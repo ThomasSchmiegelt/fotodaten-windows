@@ -36,6 +36,7 @@ import projekte  # noqa: E402
 import bausteine  # noqa: E402
 import baender  # noqa: E402
 import szenenbau  # noqa: E402
+import sechsseiten  # noqa: E402
 from torwache import torwaechter  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -56,6 +57,11 @@ engine = Engine()
 current = {"files": [], "error": None, "translated": {}, "stage": "",
            "video": None, "gelesen": {}, "nummer": 0, "titel": "", "tor": [],
            "gliederung": [], "expose": {},
+           # Der Katalogeintrag einer Sechs-Seiten-Ansicht, waehrend er
+           # entsteht. Eigenes Feld, weil diese Bilder nicht in outputs/
+           # liegen und deshalb nicht in "files" gehoeren -- die Oberflaeche
+           # baut daraus sonst Verweise auf /outputs/, die ins Leere zeigen.
+           "seiten": {},
            # Die Stufen eines Szenenaufbaus: was in welcher Reihenfolge
            # entsteht. Eigenes Feld, weil "gliederung" die Szenenprompts
            # der Geschichte fuehrt und die Oberflaeche daraus nachlaedt.
@@ -102,6 +108,9 @@ def _titel(art: str, params: dict) -> str:
     if art == "szenenbau":
         text = (params.get("text") or "").strip()
         return f"Szene aufbauen: {text[:44]}" if text else "Szene aufbauen"
+    if art == "sechsseiten":
+        was = (params.get("name") or params.get("text") or "").strip()
+        return f"Sechs Seiten: {was[:44]}" if was else "Sechs Seiten"
     if art == "demo":
         if params.get("bloecke"):
             return f"Ablauf, {len(params['bloecke'])} Bloecke"
@@ -242,7 +251,7 @@ def _abarbeiten(auftrag: dict, weitere: list[dict] | None = None) -> None:
                  else f"{len(alle)} Auftraege zusammen")
         current.update(files=[], error=None, translated={}, video=None,
                        gelesen={}, tor=[], gliederung=[], expose={},
-                       bau={},
+                       bau={}, seiten={},
                        stage="wird vorbereitet",
                        fortschritt={"ist": 0, "von": 0},
                        nummer=auftrag["nummer"], titel=titel)
@@ -250,7 +259,8 @@ def _abarbeiten(auftrag: dict, weitere: list[dict] | None = None) -> None:
             laeufe = {"demo": run_demo, "prompts": run_prompts,
                       "expose": run_expose, "ergaenzen": run_ergaenzen,
                       "aufbau": run_aufbau, "prosa": run_prosa,
-                      "szenenbau": run_szenenbau}
+                      "szenenbau": run_szenenbau,
+                      "sechsseiten": run_sechsseiten}
             laeufe.get(auftrag["art"], run_job)(auftrag["params"])
         else:
             # Ein Ladevorgang fuer alle: die fertigen Prompts gehen als Liste
@@ -275,7 +285,11 @@ def _abarbeiten(auftrag: dict, weitere: list[dict] | None = None) -> None:
                     a.get("projekt") or projekte.ALLGEMEIN, str(kennung),
                     eigene[0],
                     str((a.get("params") or {}).get("baustein_feld") or "bild"))
-            a["bilder"] = len(eigene)
+            # Die Sechs-Seiten-Ansicht legt ihre Bilder im Katalog ab und
+            # nicht in outputs/ -- sie zaehlt deshalb eigens. Sonst stuende
+            # im Verlauf "0 Bild(er)" neben sechs gerechneten.
+            a["bilder"] = len(eigene) or len(
+                (current["seiten"] or {}).get("bilder") or {})
             a["fehler"] = current["error"]
             a["zustand"] = zustand
             # Die Vorgaben samt Referenzbildern werden nicht aufgehoben.
@@ -940,6 +954,196 @@ def run_szenenbau(params: dict) -> None:
         current["error"] = err.strip().splitlines()[-1]
         melden("")
         engine.note("idle", "Aufbau fehlgeschlagen")
+
+
+def _gegenstandsplan(params: dict, projekt: str) -> dict:
+    """Alles, was die sechs Prompts brauchen: Gegenstand, Ansichten, Grund, Ausschluss.
+
+    Drei Quellen, und sie gelten in dieser Rangfolge:
+
+      von Hand         was im Eingabefeld hinter `/unten` steht. Der
+                       Benutzer hat es gerade hingeschrieben, also gilt es.
+      ein Baustein     sein Prompt mit gefuellten Luecken -- fuer den
+                       Gegenstand selbst.
+      Sprachmodell     alles Uebrige: den Gegenstand ausformulieren und zu
+                       jeder Seite schreiben, was sie zeigt und was in ihr
+                       verdeckt ist.
+
+    Gemessen: der allgemeine Satz ("the picture shows only its top") trennt
+    vorn, hinten, links und rechts sauber, hebt die Kamera bei oben und
+    unten aber nur um zwanzig Grad. Er kann auch nicht wissen, dass unten
+    die Parabolantenne sitzt und die Solarpaneele dort nur noch schmale
+    Kanten sind. Genau das schreibt das Sprachmodell dazu -- oder man
+    schreibt es selbst.
+    """
+    kennung = str(params.get("gegenstand") or "")
+    aus_baustein = ""
+    if kennung:
+        b = next((x for x in bausteine.liste(projekt)
+                  if x.get("id") == kennung), None)
+        if not b:
+            raise RuntimeError("Den gewaehlten Baustein gibt es nicht mehr")
+        aus_baustein = bausteine.einsetzen(b.get("prompt") or "",
+                                           b.get("variablen") or {})
+
+    eingabe = sechsseiten.lies_eingabe(params.get("text") or "")
+    text = eingabe["allgemein"]
+    if not aus_baustein and not text:
+        raise RuntimeError("Keine Beschreibung")
+
+    # --- Was von Hand dasteht, in einem Zug uebersetzen ------------------
+    # Ein Aufruf fuer alle Felder: einzeln kosteten sie jedes Mal die
+    # Wartezeit, und uebersetzt wird ohnehin nur, was deutsch aussieht. Die
+    # Schluessel bekommen ein Kuerzel davor, damit sich die Ansicht einer
+    # Seite nicht mit ihrem Ausschluss mischt.
+    felder = {f"s_{k}": v for k, v in eingabe["sichten"].items()}
+    felder.update({f"o_{k}": v for k, v in eingabe["ohne"].items()})
+    if eingabe["hintergrund"]:
+        felder["hintergrund"] = eingabe["hintergrund"]
+    if eingabe["ohne_alle"]:
+        felder["o_alle"] = eingabe["ohne_alle"]
+    if felder:
+        melden("Die eigenen Angaben werden uebersetzt")
+        felder.update(chat.translate(felder))
+
+    hintergrund = felder.pop("hintergrund", "")
+    ohne_alle = felder.pop("o_alle", "")
+    # Der Ausschluss geht unveraendert weiter: der Torwaechter sucht die
+    # Woerter spaeter im englischen Prompt, zurechtgebogen faende er sie
+    # nicht mehr.
+    ohne = {k[2:]: v for k, v in felder.items() if k.startswith("o_")}
+    sichten = {k[2:]: chat.ansicht_satz(v) for k, v in felder.items()
+               if k.startswith("s_")}
+    sichten = {k: v for k, v in sichten.items() if v}
+
+    fehlend = [s for s in sechsseiten.SEITEN if s not in sichten]
+    plan = {"text": "", "sichten": sichten, "hintergrund": hintergrund,
+            "ohne": ohne, "ohne_alle": ohne_alle}
+
+    if not params.get("ausformulieren", True) or not fehlend:
+        # Ohne Sprachmodell -- oder weil alle sechs Seiten schon dastehen.
+        # Der Gegenstand selbst will dann nur noch uebersetzt werden.
+        if aus_baustein:
+            return dict(plan, text=chat.ohne_zahlenvergleich(aus_baustein))
+        neu = chat.translate({"prompt": text})
+        return dict(plan, text=chat.ohne_zahlenvergleich(
+            (neu.get("prompt") or text).strip()))
+
+    melden(f"Das Sprachmodell schreibt {len(fehlend)} Ansichten")
+    geschrieben = chat.seiten_plan(aus_baustein or text,
+                                   params.get("modell") or None)
+    # Der Baustein behaelt seinen eigenen Prompt -- gefragt war er nur nach
+    # den Ansichten.
+    gegenstand = chat.ohne_zahlenvergleich(
+        aus_baustein or geschrieben.get("gegenstand") or "")
+    if not gegenstand.strip():
+        # Faellt Ollama aus, lieber uebersetzen als den Auftrag abbrechen.
+        neu = chat.translate({"prompt": text})
+        gegenstand = chat.ohne_zahlenvergleich((neu.get("prompt") or text).strip())
+    # Die eigenen Saetze bleiben oben: sie werden nicht ueberschrieben.
+    for seite in fehlend:
+        if geschrieben.get("sichten", {}).get(seite):
+            sichten[seite] = geschrieben["sichten"][seite]
+    return dict(plan, text=gegenstand, sichten=sichten)
+
+
+def run_sechsseiten(params: dict) -> None:
+    """Sechs Ansichten eines Gegenstands, in einem einzigen Ladevorgang.
+
+    Alle sechs Prompts gehen zusammen an die Maschine: der Ladevorgang kostet
+    rund eine Minute, das Rechnen eines Bildes anderthalb -- einzeln
+    eingereiht waere der Katalogeintrag ein Vielfaches davon.
+
+    Die Bilder gehen in den Katalog, nicht nach `outputs/`. Dort wird oft
+    aufgeraeumt, und ein Katalog, der dabei verschwindet, ist keiner.
+    """
+    try:
+        projekt = _projekt_des_laufs
+        plan = _gegenstandsplan(params, projekt)
+        text, sichten = plan["text"], plan["sichten"]
+        hintergrund = plan["hintergrund"]
+        stil = str(params.get("stil") or "")
+        paare = sechsseiten.alle_prompts(text, stil, sichten, hintergrund)
+        if not paare:
+            raise RuntimeError("Aus der Beschreibung laesst sich kein Prompt bilden")
+
+        # Was hinter /- steht, faellt aus dem Prompt -- je Seite einzeln.
+        # Ein Ausschluss fuer alle sechs ginge hier nicht: die Antenne soll
+        # in der Aufsicht verschwinden und ist in der Untersicht die
+        # Hauptsache. Deshalb der Torwaechter je Bild und nicht der negative
+        # Prompt, der fuer die ganze Reihe gilt (und die Rechenzeit
+        # verdoppelt, ohne an der Blickrichtung etwas zu aendern -- gemessen).
+        gestrichen = []
+        if plan["ohne"] or plan["ohne_alle"]:
+            geprueft = []
+            for seite, prompt in paare:
+                aus = ", ".join(x for x in (plan["ohne"].get(seite, ""),
+                                            plan["ohne_alle"]) if x)
+                if aus:
+                    prompt, weg = torwaechter(prompt, aus)
+                    gestrichen += [f"{sechsseiten.SEITEN[seite][0]}: {w}"
+                                   for w in weg]
+                geprueft.append((seite, prompt))
+            paare = geprueft
+        current["tor"] = gestrichen
+        seed = int(params.get("seed") or 42)
+
+        # Der Eintrag steht in der Liste, bevor das erste Bild gerechnet ist.
+        # Bricht der Lauf in der Mitte ab, ist damit sichtbar, was entstanden
+        # ist und was fehlt.
+        eintrag = sechsseiten.anlegen(
+            projekt, str(params.get("name") or ""),
+            beschreibung=str(params.get("text") or ""),
+            prompt=text, stil=stil, seed=seed, sichten=sichten,
+            hintergrund=hintergrund, ohne=plan["ohne"])
+        current["seiten"] = {"id": eintrag["id"], "projekt": projekt,
+                             "name": eintrag["name"], "prompt": text,
+                             # Damit zu sehen ist, wie das Sprachmodell den
+                             # Gegenstand von jeder Seite gelesen hat --
+                             # daran liegt es, wenn eine Ansicht danebengeht.
+                             "sichten": sichten, "bilder": {}}
+        melden("Die sechs Seiten werden gerechnet", 0, len(paare))
+
+        def sammler(meta, image):
+            seite, gerechnet = paare[meta["index"] - 1]
+            datei = sechsseiten.ablegen(projekt, eintrag["id"], seite, image,
+                                        prompt=gerechnet, seed=meta["seed"])
+            # Die Liste neu setzen statt sie zu ergaenzen: der Server liest
+            # sie im selben Augenblick fuer `/api/status`, und ein Wachsen
+            # mitten im Serialisieren waere ein Fehler aus dem Nichts.
+            current["seiten"] = {
+                **current["seiten"],
+                "bilder": {**current["seiten"]["bilder"], seite: datei}}
+            melden(f"{sechsseiten.SEITEN[seite][0]} ist fertig",
+                   meta["index"], len(paare))
+
+        engine.run_series(
+            **_series_kwargs(
+                {"base": int(params.get("base", 1024)),
+                 "steps": int(params.get("steps", 30)),
+                 # Quadratisch: ein Katalog zeigt die sechs Seiten
+                 # nebeneinander, und ein Format wuerde zu einer der sechs
+                 # Ansichten immer schlecht passen.
+                 "aspect": "1:1", "seed": seed,
+                 # Derselbe Seed fuer alle sechs. Dasselbe Ausgangsrauschen
+                 # haelt Groesse, Farbe und Anmutung ueber die Bilder
+                 # zusammen -- das einzige Mittel dafuer, das bleibt, wenn
+                 # kein Vorlagenbild in Frage kommt.
+                 "lock_seed": True},
+                [], "t2i", sammler),
+            prompts=[p for _, p in paare])
+
+        melden("")
+        fertig = len(current["seiten"]["bilder"])
+        engine.note("idle",
+                    f"Katalogeintrag fertig: {fertig} von {len(paare)} Seiten"
+                    if fertig else "abgebrochen")
+    except Exception:
+        err = traceback.format_exc()
+        print(err, file=sys.stderr)
+        current["error"] = err.strip().splitlines()[-1]
+        melden("")
+        engine.note("idle", "Die sechs Seiten sind fehlgeschlagen")
 
 
 def run_demo(params: dict) -> None:

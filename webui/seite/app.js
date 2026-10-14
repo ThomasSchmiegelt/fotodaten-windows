@@ -22,6 +22,7 @@ const MODES = {
   szenen: {label: "Szene erzeugen", refs: 0, ph: "", hint: () => ""},
   geschichte: {label: "Geschichte erzeugen", refs: 0, ph: "", hint: () => ""},
   katalog: {label: "Katalog", refs: 0, ph: "", hint: () => ""},
+  seiten: {label: "Sechs Seiten erzeugen", refs: 0, ph: "", hint: () => ""},
   varianten: {label: "Varianten erzeugen", refs: 1, sweep: "varianten", count: 12,
               follow: true, lock: false,
               ph: "(optional) zusätzliche Angaben, die für jede Variante gelten",
@@ -90,6 +91,12 @@ fetch("/api/info").then(r => r.json()).then(info => {
   $("bsStil").innerHTML = `<option value="">— Stil der Geschichte —</option>`
     + (info.styles || []).map(x =>
         `<option value="${x.key}">${esc(x.label)}</option>`).join("");
+  // Leer heisst hier wirklich ohne Stilangabe -- ein Katalogbild soll
+  // schlicht sein duerfen.
+  $("seitenStil").innerHTML = `<option value="">— ohne Stilangabe —</option>`
+    + (info.styles || []).map(x =>
+        `<option value="${x.key}">${esc(x.label)}</option>`).join("");
+  SEITENNAMEN = info.katalogseiten || [];
   GEZEICHNET = info.gezeichnet || [];
   fill("gsWelt", info.welten);
   // Gross fuer die schoepferische Arbeit, klein fuer alles andere.
@@ -272,11 +279,15 @@ function setMode(next) {
   const istKatalog = next === "katalog";
   $("katalogBox").style.display = istKatalog ? "block" : "none";
   if (istKatalog) katalogHolen();
+  const istSeiten = next === "seiten";
+  $("seitenBox").style.display = istSeiten ? "block" : "none";
+  if (istSeiten) { seitenGegenstandFuellen(); seitenHolen(); }
   $("szenenBox").style.display = istSzenen ? "block" : "none";
   $("geschichteBox").style.display = istGeschichte ? "block" : "none";
   // Beide Reiter haben eine eigene Bedienung und brauchen die ueblichen
   // Kaesten nicht -- Prompt, Darstellung, Bildgroesse.
-  const eigen = istDemo || istBausteine || istSzenen || istGeschichte || istKatalog;
+  const eigen = istDemo || istBausteine || istSzenen || istGeschichte
+                || istKatalog || istSeiten;
   $("demoBox").style.display = istDemo ? "block" : "none";
   $("bausteinBox").style.display = istBausteine ? "block" : "none";
   // Im Ablauf-Reiter ist das Prompt-Feld ausgeblendet -- dort waere das
@@ -866,7 +877,11 @@ async function start() {
   }
   poll();
 }
-$("go").onclick = () => (mode === "demo" ? starteDemo() : start());
+$("go").onclick = () => {
+  if (mode === "demo") return starteDemo();
+  if (mode === "seiten") return seitenStarten();
+  start();
+};
 $("stop").onclick = () => {
   // Nur den laufenden Auftrag. Wartende nimmt man einzeln aus der Liste.
   fetch("/api/cancel", {method: "POST"});
@@ -3140,6 +3155,196 @@ async function katalogKopieren(von, id, feld) {
 $("katArt").onchange = katalogZeigen;
 $("katSuche").addEventListener("input", katalogZeigen);
 
+// ---------- Sechs Seiten ----------
+// Ein Gegenstand, sechsmal gerade von einer Seite. Die Bilder liegen im
+// Katalogverzeichnis und nicht in outputs/ -- deshalb hat dieser Reiter
+// seine eigene Liste und seine eigenen Verweise, /katalog/... statt
+// /outputs/...
+let SEITENNAMEN = [], SEITENKATALOG = [];
+
+async function seitenRuf(daten) {
+  const res = await fetch("/api/sechsseiten", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(daten)
+  }).then(r => r.json()).catch(() => null);
+  if (!res || res.error) {
+    say(res ? res.error : "Der Server ist nicht erreichbar.", "err");
+    return null;
+  }
+  return res;
+}
+
+// Die Gegenstaende aus den Bausteinen. Wer einen angelegt hat, soll ihn
+// nicht ein zweites Mal beschreiben muessen.
+function seitenGegenstandFuellen() {
+  const vorher = $("seitenGegenstand").value;
+  const dinge = BAUSTEINE.filter(b => b.art === "gegenstand");
+  $("seitenGegenstand").innerHTML = `<option value="">— frei beschreiben —</option>`
+    + dinge.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join("");
+  if (vorher) $("seitenGegenstand").value = vorher;
+  seitenQuelle();
+}
+
+// Ein Baustein bringt seinen Prompt mit; das Beschreibungsfeld haette dann
+// keine Wirkung. Lieber gesperrt als wirkungslos -- sonst tippt man einen
+// Satz hinein und sucht ihn hinterher im Bild.
+function seitenQuelle() {
+  const eigen = !$("seitenGegenstand").value;
+  $("seitenText").disabled = !eigen;
+  $("seitenAusformulieren").disabled = !eigen;
+}
+$("seitenGegenstand").addEventListener("change", seitenQuelle);
+
+// Die sechs Plaetze. Was noch fehlt, bleibt als leeres Feld stehen -- so ist
+// zu sehen, wie viele Ansichten noch kommen.
+function seitenMosaik(projekt, id, bilder, sichten) {
+  return `<div class="mosaic">` + SEITENNAMEN.map(s => {
+    const datei = (bilder || {})[s.key];
+    const url = `/katalog/${projekt}/${id}/${datei}`;
+    // Was das Sprachmodell ueber diese Ansicht gesagt hat, haengt am Bild:
+    // bei einer schiefen Ansicht steht sonst nirgends, woran es lag.
+    const satz = ((sichten || {})[s.key] || "").trim();
+    return datei
+      ? `<figure class="tile">
+           <img src="${url}" alt="${esc(s.label)}" title="${esc(satz)}">
+           <figcaption><span>${esc(s.label)}</span>
+             <a href="${url}" download title="Herunterladen">&darr;</a></figcaption>
+         </figure>`
+      : `<div class="slot" title="${esc(satz)}">${esc(s.label)}</div>`;
+  }).join("") + `</div>`;
+}
+
+// Der Eintrag, waehrend er entsteht.
+function zeigeSeiten(st) {
+  if (!st || !st.id) { $("seitenJetzt").innerHTML = ""; return; }
+  // So hat das Sprachmodell den Gegenstand von jeder Seite gelesen. Das ist
+  // die Stelle, an der eine danebengegangene Ansicht erklaerbar wird.
+  const sichten = st.sichten || {};
+  const gelesen = SEITENNAMEN.filter(s => (sichten[s.key] || "").trim())
+    .map(s => `<b>${esc(s.label)}:</b> ${esc(sichten[s.key])}`).join("<br>");
+  $("seitenJetzt").innerHTML =
+    `<p class="hint">Im Katalog entsteht: <b>${esc(st.name || "")}</b><br>`
+    + `<code>${esc(st.prompt || "")}</code></p>`
+    + (gelesen ? `<p class="hint">${gelesen}</p>` : "")
+    + seitenMosaik(st.projekt, st.id, st.bilder, sichten);
+}
+
+async function seitenHolen() {
+  const g = await seitenRuf({tu: "liste"});
+  if (!g) return;
+  if (!SEITENNAMEN.length) SEITENNAMEN = g.seiten || [];
+  SEITENKATALOG = g.katalog || [];
+  zeigeSeitenKatalog();
+}
+
+function zeigeSeitenKatalog() {
+  const n = SEITENKATALOG.length;
+  $("seitenZahl").textContent = n === 1 ? "1 Gegenstand" : `${n} Gegenstände`;
+  $("seitenListe").innerHTML = n
+    ? SEITENKATALOG.map(e => {
+      const fehlt = SEITENNAMEN.length - Object.keys(e.bilder || {}).length;
+      return `<div class="katgruppe">
+        <h3>${esc(e.name)} <span class="art">${esc(e.projektname)}</span>
+          <span class="knopf" onclick="seitenWeg('${e.projekt}','${e.id}')"
+            title="Eintrag mit allen Bildern löschen">×</span></h3>
+        <p class="hint">${esc(e.angelegt || "")}${
+          fehlt > 0 ? ` · noch ${fehlt} ohne Bild` : ""}<br>
+          <code>${esc(e.prompt || "")}</code><br>
+          <a href="#" onclick="seitenPrompt('${e.id}');return false">Prompt
+            übernehmen</a> ·
+          <a href="#" onclick="seitenVorlage('${e.projekt}','${e.id}');return false">Vorderansicht
+            als Vorlage</a> — für <code>/magazine cover</code>,
+          <code>/ptexplosion</code>, <code>/cad</code>, <code>/blueprint</code></p>
+        ${seitenMosaik(e.projekt, e.id, e.bilder, e.sichten)}
+      </div>`;
+    }).join("")
+    : `<p class="hint">Noch kein Gegenstand im Katalog.</p>`;
+}
+
+async function seitenWeg(projekt, id) {
+  if (!confirm("Diesen Katalogeintrag mit allen sechs Bildern endgültig "
+               + "löschen? Einen Papierkorb gibt es nicht.")) return;
+  const erg = await seitenRuf({tu: "loeschen", projekt: projekt, id: id});
+  if (!erg) return;
+  say("Katalogeintrag gelöscht.", "ok");
+  seitenHolen();
+}
+
+// Der Gegenstandsprompt in Text->Bild. Er ist das, was den Gegenstand
+// ausmacht -- aus ihm laesst sich alles Weitere bauen.
+function seitenPrompt(id) {
+  const e = SEITENKATALOG.find(x => x.id === id);
+  if (!e) return;
+  setMode("t2i");
+  $("prompt").value = e.prompt || "";
+  say("Prompt übernommen — jetzt lässt sich daraus Neues bauen.", "ok");
+}
+
+// Die Vorderansicht als Referenzbild in Bearbeiten. Das ist der Weg zu
+// Cover, Explosionszeichnung, CAD und Bauplan: alle vier setzen auf einem
+// Bild auf, nicht auf frischem Text -- sonst waere es ein anderer
+// Gegenstand.
+async function seitenVorlage(projekt, id) {
+  const e = SEITENKATALOG.find(x => x.id === id);
+  const datei = ((e || {}).bilder || {}).vorne;
+  if (!datei) return say("Dieser Eintrag hat noch keine Vorderansicht.", "err");
+  if (refs.length >= maxRefs) return say(`Schon ${maxRefs} Vorlagen geladen.`, "err");
+  const antwort = await fetch(`/katalog/${projekt}/${id}/${datei}`)
+    .then(r => r.blob()).catch(() => null);
+  if (!antwort) return say("Das Bild ließ sich nicht laden.", "err");
+  const leser = new FileReader();
+  leser.onload = () => {
+    refs.push(leser.result);
+    refPrompts.push("");
+    setMode("edit");
+    drawThumbs();
+    say("Vorderansicht als Vorlage geladen — jetzt einen Effekt wählen.", "ok");
+  };
+  leser.readAsDataURL(antwort);
+}
+
+async function seitenStarten() {
+  const text = $("seitenText").value.trim();
+  const gegenstand = $("seitenGegenstand").value;
+  if (!text && !gegenstand) {
+    return say("Bitte den Gegenstand beschreiben oder einen Baustein wählen.", "err");
+  }
+  let seed = parseInt($("seed").value, 10);
+  if (isNaN(seed) || seed < 0) {
+    seed = Math.floor(Math.random() * 2 ** 31);
+    $("seed").value = seed;
+  }
+  buttonState("busy");
+  const res = await seitenRuf({
+    text: text, gegenstand: gegenstand,
+    name: $("seitenName").value.trim(), stil: $("seitenStil").value,
+    ausformulieren: $("seitenAusformulieren").checked,
+    base: parseInt($("base").value, 10),
+    steps: parseInt($("steps").value, 10),
+    seed: seed, modell: $("gsModell").value});
+  if (!res) return buttonState("idle");
+  say("Die sechs Seiten werden gerechnet …", "ok");
+  poll();
+}
+$("seitenGo").onclick = e => { e.preventDefault(); seitenStarten(); };
+
+// Erst der Vorschlag, dann das Nachbessern, dann die Bilder. Das
+// Sprachmodell schreibt den ganzen Satz Befehle ins Feld -- es ist dasselbe,
+// das sonst beim Erzeugen im Verborgenen liefe, nur sichtbar und aenderbar.
+async function seitenVorschlagen() {
+  const text = $("seitenText").value.trim();
+  if (!text) return say("Bitte zuerst beschreiben, was zu sehen sein soll.", "err");
+  $("seitenVorschlag").textContent = "schreibt …";
+  const res = await seitenRuf({tu: "vorschlag", text: text,
+                               modell: $("gsModell").value});
+  $("seitenVorschlag").innerHTML = "<b>Vorschlag schreiben lassen</b>";
+  if (!res) return;
+  $("seitenText").value = res.text;
+  seitenQuelle();
+  say("Vorschlag steht — durchlesen, ändern, dann erzeugen.", "ok");
+}
+$("seitenVorschlag").onclick = e => { e.preventDefault(); seitenVorschlagen(); };
+
 // ---------- Projekte ----------
 // Ein Projekt bestimmt, wohin neue Bilder gehen und welche die Galerie zeigt.
 // "Allgemein" ist das alte outputs/ -- die Bilder von frueher bleiben dort.
@@ -3243,6 +3448,7 @@ function poll() {
       zeigeExpose(s.expose);
       zeigeGliederung(s.gliederung);
       zeigeBau(s.bau);
+      zeigeSeiten(s.seiten);
       laufendeArbeit = !!(s.busy && s.titel);
       wartendeAnzahl = (s.wartend || []).length;
       // Wechselt der laufende Auftrag, ist der vorige fertig -- seine Bilder
@@ -3264,6 +3470,9 @@ function poll() {
     if (s.video) zeigeVideo(s.video);
     if (done) say(`${s.message} in ${fmt(s.elapsed)}`, "ok");
     else { $("fill").style.width = "0"; say(s.message); }
+    // Der Katalog liegt ausserhalb von outputs/ -- loadGallery() sieht ihn
+    // nicht, er muss eigens nachgeladen werden.
+    if (mode === "seiten") seitenHolen();
     loadGallery();
   }, 900);
 }

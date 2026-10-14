@@ -51,6 +51,7 @@
       <button id="tab-szenen">Szenen</button>
       <button id="tab-geschichte">Geschichte</button>
       <button id="tab-katalog">Katalog</button>
+      <button id="tab-seiten">Sechs Seiten</button>
     </div>
 
     <fieldset id="bausteinBox" style="display:none">
@@ -412,6 +413,80 @@
       </div>
       <p class="hint" id="katZahl"></p>
       <div id="katListe"></div>
+    </fieldset>
+
+
+    <fieldset id="seitenBox" style="display:none">
+      <legend>Sechs Seiten</legend>
+      <p class="hint">Ein Gegenstand, sechsmal gerade von einer Seite:
+        <b>vorne, hinten, links, rechts, oben, unten</b> — wie in einem
+        Teilekatalog. Der Gegenstand <b>schwebt</b> dabei frei im Raum, und
+        das aus einem Grund: steht er auf einem Tisch, zeigt die Ansicht von
+        unten die Tischplatte statt seines Bodens.</p>
+      <p class="hint">Alle sechs Bilder entstehen aus derselben Beschreibung,
+        mit demselben Seed, in <b>einem</b> Ladevorgang — das hält Größe,
+        Farbe und Anmutung über die sechs Ansichten zusammen. Sie landen
+        <b>nicht</b> in <code>outputs/</code>, sondern im Katalogverzeichnis
+        <code>katalog/&lt;Projekt&gt;/</code>; dort überleben sie das
+        Aufräumen.</p>
+
+      <div class="axis">
+        <div>
+          <label for="seitenGegenstand">Gegenstand</label>
+          <select id="seitenGegenstand"></select>
+        </div>
+        <div>
+          <label for="seitenName">Name im Katalog</label>
+          <input id="seitenName" placeholder="z. B. Blechkanne">
+        </div>
+      </div>
+      <p class="hint">Ein Baustein der Art <b>Gegenstand</b> bringt seinen
+        Prompt mit — dann ist die Beschreibung unten ohne Wirkung.</p>
+
+      <label for="seitenText">Beschreibung auf Deutsch</label>
+      <textarea id="seitenText" style="min-height:120px"
+        placeholder="ein Erdbeobachtungssatellit, kastenförmiger Körper mit goldener Isolationsfolie, zwei blaue Solarpaneele&#10;/hintergrund ein tiefschwarzer Sternenhimmel&#10;/unten die weiße Parabolantenne füllt die Mitte, die Paneele nur noch als schmale Kanten&#10;/-unten Kameratubus, Düsen"></textarea>
+      <p class="hint">Oben steht der Gegenstand. Darunter lässt sich <b>jede
+        Seite einzeln</b> beschreiben — mit ihrem Befehl am Zeilenanfang:
+        <code>/vorne</code> <code>/hinten</code> <code>/links</code>
+        <code>/rechts</code> <code>/oben</code> <code>/unten</code>. Sag dort,
+        <b>was in dieser Ansicht zu sehen ist und was verdeckt ist</b> —
+        nicht, wo die Kamera steht; danach richtet sich das Bildmodell kaum.
+        Was du nicht schreibst, schreibt das Sprachmodell.</p>
+      <p class="hint"><b>Was nicht zu sehen sein soll, gehört hinter
+        <code>/-</code></b> — nicht in den Seitentext. „die Antenne ist
+        verdeckt“ nennt die Antenne, und ein Diffusionsmodell malt, was
+        dasteht; die Verneinung davor liest es kaum. <code>/-oben
+        Parabolantenne, Düsen</code> streicht die Wörter stattdessen aus dem
+        Prompt dieser einen Ansicht. <code>/-</code> ohne Seite gilt für alle
+        sechs. <code>/+oben</code> ist dasselbe wie <code>/oben</code>.</p>
+      <p class="hint"><code>/hintergrund</code> ersetzt das neutrale Grau —
+        ein Satellit gehört vor Sterne, ein Werkzeug vor nichts. Der
+        Gegenstand schwebt in jedem Fall: kein Tisch, kein Boden, kein
+        Schatten, sonst wäre die Ansicht von unten wieder verdeckt.</p>
+      <label class="check"><input type="checkbox" id="seitenAusformulieren" checked>
+        den Prompt vom Sprachmodell ausformulieren lassen</label>
+      <p class="hint">Form, Material, Oberfläche, Zustand — daran hält sich
+        das Bildmodell über sechs Ansichten fest. „eine alte Blechkanne“
+        allein ergibt sechs verschiedene Kannen. Ohne Häkchen wird die
+        Beschreibung nur übersetzt.</p>
+
+      <label for="seitenStil">Stil</label>
+      <select id="seitenStil"></select>
+      <p class="hint">
+        <a href="#" id="seitenVorschlag"><b>Vorschlag schreiben lassen</b></a> ·
+        <a href="#" id="seitenGo">Sechs Seiten erzeugen</a></p>
+      <p class="hint">Der Vorschlag füllt das Feld oben mit allen sechs
+        Seiten samt <code>/-</code>-Zeilen — auf Englisch, so wie es ins
+        Bild geht. Lies ihn durch, ändere was nicht stimmt, und erzeuge
+        erst dann. Was du selbst geschrieben hast, bleibt stehen; der
+        Vorschlag füllt nur die Lücken. Zehn Minuten Rechenzeit sind zu
+        viel, um einen Fehler erst im fertigen Bild zu sehen.</p>
+      <div id="seitenJetzt"></div>
+
+      <div class="head" style="margin-top:14px"><h2>Katalog</h2>
+        <span class="hint" id="seitenZahl"></span></div>
+      <div id="seitenListe"></div>
     </fieldset>
 
     <div id="uploadBox" style="display:none">

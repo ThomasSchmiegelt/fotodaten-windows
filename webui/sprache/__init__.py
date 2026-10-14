@@ -2,6 +2,7 @@
 
     ollama        Adresse, Modell, der Aufruf selbst
     deuten        Freitext -> Prompt und Reglerstellung
+    ansichten     ein Gegenstand von sechs Seiten: was jede Seite zeigt
     uebersetzen   Deutsch -> Englisch, nur wo noetig
     sehen         Bilder beschreiben und rueckwaerts den Prompt schreiben
 
@@ -14,6 +15,7 @@ from .deuten import (
     luecken_vorschlaege, sanitise,
     person_teilen, system_prompt, teil_prompt,
 )
+from .ansichten import ansicht_satz, ohne_zahlenvergleich, seiten_plan
 from .stellung import bauplan
 from .aufbau import (
     abschnitte, kapitel, rahmen, szenen_aus_abschnitt,
@@ -27,7 +29,8 @@ from .sehen import bild_frage, bild_lesen, bild_zu_prompt, ist_weiblich
 from .uebersetzen import looks_german, translate
 
 __all__ = [
-    "abschnitte", "bauplan", "kapitel", "rahmen", "szenen_aus_abschnitt",
+    "abschnitte", "ansicht_satz", "bauplan", "ohne_zahlenvergleich",
+    "seiten_plan", "kapitel", "rahmen", "szenen_aus_abschnitt",
     "ERZAEHLER", "FREIGABEN", "GROSS", "MODEL", "MODES", "OLLAMA", "WELTEN",
     "erzaehlerstimme", "freigabe", "entladen", "expose", "ask", "available", "baustein_prompt", "bausteine_raten",
     "bild_frage", "bild_lesen",

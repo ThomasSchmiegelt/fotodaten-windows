@@ -28,6 +28,26 @@ Minuten, jedes weitere nur noch die reine Rechenzeit.
 Gemessen bei 1024 px und 30 Schritten: **erstes Bild ~100 s, jedes weitere
 ~25 s.** Zehn Varianten dauern also rund fünf statt siebzehn Minuten.
 
+**Dekodiert wird bis ein Megapixel am Stück.** Die VAE kann das Bild
+kachelweise zusammensetzen, und das war lange bedingungslos eingeschaltet —
+der Transformer belegt beim Dekodieren ja noch ~14 GB. Kacheln hinterlässt
+aber Spuren: keine harten Nähte, die werden überblendet, sondern weiche
+Helligkeitsunterschiede auf Kachelgröße. Auf einer glatten hellen Fläche
+sieht man sie als senkrechte Striche und Farbflecken.
+
+Gemessen am selben Prompt mit demselben Seed, nur anders dekodiert: die
+Helligkeitsspanne im Hintergrund fällt von **4,3 auf 2,2** Graustufen, der
+Farbdrift zwischen den Kanälen von **14 auf 8**. Bis `QWEN_VOLLBILD`
+(Vorgabe 1024×1024) dekodiert die VAE deshalb in einem Stück, darüber weiter
+kachelweise.
+
+Was dabei *nicht* hilft, ebenfalls gemessen: mehr Schritte (24 und 40 sind
+gleich gut), ein höherer CFG-Wert (2,5 verdreifacht die Welligkeit) und vor
+allem der Versuch, die Fehler im Prompt zu verbieten — „no gradient, no
+clouds, no banding" verdoppelt sie. Dasselbe wie überall: ein Bildmodell malt,
+was dasteht, auch wenn ein „no" davorsteht. Ein dunkler Hintergrund ist
+praktisch frei davon.
+
 ## Installation
 
 ```bash
@@ -56,6 +76,8 @@ Karte laden, werfen sich gegenseitig heraus.
 
 **Fünf Betriebsarten:** Text zu Bild · Bearbeiten (1–4 Referenzbilder) ·
 Gruppe · Umrundung (eine Person aus wechselnden Blickwinkeln) · Varianten.
+Dazu eigene Reiter für Abläufe, Bausteine, Szenen, Geschichten, den Katalog
+und die **Sechs-Seiten-Ansicht** eines Gegenstands.
 
 **Gruppe** kennt drei Aufgaben: *aus Einzelbildern zusammenstellen* (je ein
 Bild pro Person), *Person ergänzen* (erstes Bild ist das Gruppenfoto, danach
@@ -245,6 +267,117 @@ Seite, nach Art und Text durchsuchbar. Von dort lässt sich eine Person, ein
 Ort oder ein Gegenstand in ein anderes Projekt übernehmen — das Bild wandert
 als Kopie mit, damit es das Löschen des Ursprungsprojekts überlebt.
 
+**Sechs Seiten.** Ein Gegenstand, sechsmal gerade von einer Seite —
+vorne, hinten, links, rechts, oben, unten, wie in einem Teilekatalog. Man
+beschreibt ihn einmal auf Deutsch (oder wählt einen Baustein der Art
+*Gegenstand*), und alle sechs Ansichten entstehen aus demselben Text, mit
+demselben Seed, in **einem** Ladevorgang.
+
+Der Gegenstand **schwebt dabei frei im Raum**, und das ist der eigentliche
+Trick: steht er auf einem Tisch, zeigt die Ansicht von unten die Tischplatte
+statt seines Bodens. Kein Tisch, kein Sockel, keine Hand, kein Boden, kein
+Schlagschatten — jedes einzeln genannt, sonst malt das Modell eines davon
+dazu.
+
+Kein Vorlagenbild: ein Referenzbild hält die Blickrichtung fest — dieselbe
+Beobachtung wie beim Szenenaufbau, wo eine stehende Figur stehen blieb,
+obwohl der Text sie liegend wollte. Die Ansicht von unten wäre damit wieder
+die von vorn. Derselbe Seed für alle sechs ist das stärkste Mittel, das
+bleibt; es hält Größe, Farbe und Anmutung zusammen.
+
+**Nicht wo die Kamera steht, sondern was das Bild zeigt.** Gemessen an sechs
+Formulierungen für dieselbe Ansicht, gleicher Seed, gleicher Gegenstand:
+„a true top view, the camera directly above it" ergab dasselbe
+Dreiviertelbild wie „flat lay", wie die orthografische Zeichnung, wie die
+zweimal gesagte Blickrichtung. Deutlich höher kam allein die Fassung, die
+beschreibt, *was im Bild ist* — „the picture shows only its top, the sides
+of the body are hidden beneath it". Dieselbe Bauart lieferte auch die bis
+dahin nicht erreichte Untersicht. Alle sechs Seiten sind seither so gebaut,
+und sie sagen jeweils auch, was in dieser Ansicht **verdeckt** ist.
+
+**Das Sprachmodell beschreibt den Gegenstand von jeder Seite.** Ein
+allgemeiner Satz weiß nichts über den Gegenstand — er kann nicht sagen, dass
+unten die Parabolantenne sitzt und die Solarpaneele dort nur noch schmale
+Kanten sind. Deshalb geht die deutsche Beschreibung zuerst an Ollama
+(`webui/sprache/ansichten.py`), das daraus den englischen Gegenstandsprompt
+*und* je Seite einen Satz schreibt. Dieselbe Arbeitsteilung wie beim
+Szenenaufbau: das Sprachmodell denkt über den Gegenstand nach, das Bildmodell
+malt. Die sechs Sätze stehen in der Oberfläche über den Bildern und hängen
+als Titel an jeder Kachel — geht eine Ansicht daneben, ist ablesbar, woran
+es lag.
+
+Eine Falle dabei, zweifach abgesichert: bei *unten* stellt das Sprachmodell
+den Gegenstand gern auf etwas („while the base rests on a flat ground
+plane"). Im Prompt angekommen wäre das ein Boden im Bild — und die
+Unteransicht wieder verdeckt, also genau der Fehler, den die Funktion
+vermeiden soll. Der Systemtext verbietet es, und ein Filter schneidet so
+einen Satzteil heraus; steht er mitten in der Hauptsache, fällt der ganze
+Seitensatz weg und der allgemeine gilt.
+
+**Jede Seite lässt sich selbst schreiben.** Im Eingabefeld steht oben der
+Gegenstand, darunter jede Seite mit ihrem eigenen Befehl — dieselbe
+Schreibweise wie die `/Namen` in einer Geschichte:
+
+```
+ein Erdbeobachtungssatellit, kastenförmiger Körper mit goldener Folie
+/hintergrund ein tiefschwarzer Sternenhimmel
+/unten  die weiße Parabolantenne füllt die Mitte als voller Kreis, links
+        und rechts die Unterseiten der Solarpaneele
+/oben   die goldene Oberseite füllt die Mitte als Kreis, die Paneele flach
+        daneben
+/-oben  Parabolantenne, Kameratubus, Düsen
+```
+
+Was dasteht, gilt; was fehlt, schreibt das Sprachmodell. `/hintergrund`
+ersetzt das neutrale Grau — ein Satellit gehört vor Sterne, ein Werkzeug vor
+nichts. Das Schweben bleibt davon unberührt.
+
+**`/-` ist dabei der eigentliche Kunstgriff.** Was nicht zu sehen sein soll,
+darf im Prompt nicht vorkommen — auch nicht als „die Antenne ist verdeckt".
+Ein Diffusionsmodell malt, was dasteht; die Verneinung davor liest es kaum.
+Gemessen an der Aufsicht des Satelliten: im Prompt stand *„the antenna,
+camera tube and thrusters are all hidden"*, und die Antenne war im Bild.
+Hinter `/-oben` genannt, fällt sie stattdessen aus dem Satz dieser einen
+Ansicht heraus — über den **Torwächter**, der das ganze Aufzählungsglied
+entfernt. `/-` ohne Seite gilt für alle sechs, `/+oben` ist dasselbe wie
+`/oben`.
+
+**Den ganzen Satz Befehle schreibt auf Wunsch das Sprachmodell.** „Vorschlag
+schreiben lassen" füllt das Feld mit allen sechs Seiten samt `/-`-Zeilen — auf
+Englisch, so wie es ins Bild geht. Man liest ihn durch, ändert was nicht
+stimmt und erzeugt erst dann; zehn Minuten Rechenzeit sind zu viel, um einen
+Fehler erst im fertigen Bild zu sehen. Was man selbst geschrieben hat, bleibt
+stehen, der Vorschlag füllt nur die Lücken.
+
+Dabei wird die Antwort nicht blind geglaubt: beim ersten Versuch nannte das
+Modell unter `/vorne` den Kameratubus als Hauptsache und führte ihn in
+derselben Antwort unter `/-vorne` als verdeckt. Übernommen hätte der
+Torwächter der Ansicht ihr Motiv weggestrichen. Was im sichtbaren Satz
+vorkommt, fällt deshalb aus der Ausschlussliste heraus.
+
+**Zahlenvergleiche werden in Worte gefasst.** „two solar panels … extending
+**four times** the length of the body" ergab einen Satelliten mit **vier**
+Paneelen: das Bildmodell zählt nicht, es sieht die Zahl neben der Sache. Aus
+`four times the length of the body` wird deshalb `far beyond the body`, aus
+`three times as tall as the housing` wird `very tall, far beyond the
+housing`. Eine echte Anzahl — „two solar panels and 4 thrusters" — bleibt
+unangetastet; der Riegel greift nur vor `times`, `twice` und `double`.
+
+Je Seite und nicht für die ganze Reihe, und zwar aus einem Grund: dieselbe
+Antenne soll in der Aufsicht verschwinden und ist in der Untersicht die
+Hauptsache. Der negative Prompt des Modells kann das nicht — er gilt für alle
+Bilder eines Ladevorgangs. Er wurde gemessen (CFG 2,5 gegen
+„Dreiviertelansicht, Perspektive"): macht die Bilder schärfer, an der
+Blickrichtung ändert er nichts, und er verdoppelt die Rechenzeit. Der
+Torwächter kostet nichts und trifft genau.
+
+Die Bilder landen **nicht in `outputs/`**, sondern in
+`katalog/<Projekt>/<Eintrag>/` mit einer Liste in
+`katalog/<Projekt>/katalog.json`. In `outputs/` wird oft aufgeräumt, und ein
+Katalog, der beim Aufräumen verschwindet, ist keiner. Jeder Lauf ergibt einen
+eigenen Eintrag — wer denselben Gegenstand noch einmal rechnet, bekommt einen
+zweiten daneben und kann vergleichen.
+
 **Prompt aus einem Bild.** Der umgekehrte Weg: ein Bild wählen, das
 Sprachmodell beschreibt es als Prompt und stellt Stil, Licht und Objektiv
 gleich passend ein (gemessen 5–9 s). Im Ablauf-Reiter wird ein hochgeladenes
@@ -254,9 +387,11 @@ Startbild sofort kurz beschrieben; der Text lässt sich vor dem Start ändern.
 10 Lichtstimmungen, 18 Kameraperspektiven (elf Objektive und die sieben aus
 den Einstellungen), 10 Blickwinkel, 8 Vorlagen
 (Porträt, Logo, Buchumschlag, Verpackung, Icon, Web- und App-Muster) sowie
-17 Effekte als Kurzbefehle — `/remove BG`, `/colorize`, `/blueprint`,
+18 Effekte als Kurzbefehle — `/remove BG`, `/colorize`, `/blueprint`,
 `/cad2real` (aus einer CAD-Ansicht ein Produktfoto mit echten Materialien,
 Oberflächenspuren und Kontaktschatten, bei unveränderter Geometrie),
+`/cad` (der Gegenweg: aus dem Foto die Konstruktionsansicht — grauer
+Volumenkörper, scharfe Kanten, keine Spiegelungen),
 `/upscale` (dasselbe Bild in 2048er Kantenlänge, mit ausgezeichneten
 Strukturen statt geglätteter Kanten), `/magazine cover`, `/360 View` und
 weitere. Kurzbefehle lassen sich direkt in
@@ -471,7 +606,10 @@ webui/kataloge/       Voreinstellungen: anmutung.py (Stil, Licht, Kamera,
                       vorlage.py (Prompt-Vorlagen, Effekte, Gruppen)
 webui/sprache/        Ollama: deuten.py (Freitext), uebersetzen.py,
                       sehen.py (Bilder lesen), erzaehlen.py (Handlung in
-                      Szenen), ollama.py (der Aufruf)
+                      Szenen), ansichten.py (ein Gegenstand von sechs
+                      Seiten), ollama.py (der Aufruf)
+webui/szenenbau.py    eine Szene in Stufen: Kulisse, Posen, Zusammensetzen
+webui/sechsseiten.py  sechs Ansichten eines Gegenstands und ihr Katalog
 webui/ablauf.py       Abläufe als Blöcke, mitgelieferte Folgen
 webui/demo.py         Startbild-Vorgabe und Videobau
 webui/pruefung.py     Oberfläche gegen den Server prüfen

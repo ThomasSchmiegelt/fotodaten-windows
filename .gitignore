@@ -7,6 +7,9 @@ outputs/
 # Projekte samt ihrer Bilder bleiben lokal
 projekte/
 
+# Der Katalog der Sechs-Seiten-Ansichten -- Bilder, die outputs/ ueberleben
+katalog/
+
 # Eigene Vorlagen und was daraus entsteht bleiben ebenfalls lokal
 basis/
 demo/bilder/

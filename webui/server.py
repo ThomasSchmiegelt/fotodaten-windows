@@ -39,6 +39,7 @@ import geschichte  # noqa: E402
 import sprache as chat  # noqa: E402
 import ablauf  # noqa: E402
 import demo  # noqa: E402
+import sechsseiten  # noqa: E402
 from kataloge import (  # noqa: E402
     AXIS_OFF, EFFECTS, EINSTELLUNGEN, FOLGEN, GEZEICHNET, GROUP_ACTIONS,
     MIMIK, PAINT_TARGET, WESEN,
@@ -223,6 +224,19 @@ class Handler(BaseHTTPRequestHandler):
             with open(datei, "rb") as fh:
                 return self._send(200, fh.read(), art)
 
+        if path.startswith("/katalog/"):
+            # Die Bilder einer Sechs-Seiten-Ansicht. Sie liegen bewusst
+            # ausserhalb von outputs/ -- dort wird oft aufgeraeumt -- und
+            # brauchen deshalb ihren eigenen Weg nach draussen.
+            teile = path[len("/katalog/"):].split("/")
+            if len(teile) != 3:
+                return self._json(404, {"error": "not found"})
+            datei = sechsseiten.bildpfad(*teile)
+            if not datei:
+                return self._json(404, {"error": "not found"})
+            with open(datei, "rb") as fh:
+                return self._send(200, fh.read(), "image/png")
+
         if path.startswith("/seite/"):
             # Aufbau, Aussehen und Verhalten der Oberflaeche liegen getrennt.
             # Nur schlichte Namen, keine Verzeichniswechsel.
@@ -249,6 +263,7 @@ class Handler(BaseHTTPRequestHandler):
             status["gliederung"] = list(current["gliederung"])
             status["expose"] = dict(current["expose"])
             status["bau"] = dict(current["bau"])
+            status["seiten"] = dict(current["seiten"])
             status["nummer"] = current["nummer"]
             status["titel"] = current["titel"]
             status.update(uebersicht())
@@ -300,6 +315,8 @@ class Handler(BaseHTTPRequestHandler):
                  "luecke": next(iter(v.get("vorgabe") or {}), "")}
                 for k, v in EINSTELLUNGEN.items()]
             info["projekt"] = projekte.aktiv()
+            info["katalogseiten"] = [{"key": k, "label": v[0]}
+                                     for k, v in sechsseiten.SEITEN.items()]
             info["demo"] = demo.available()
             info["kulissen"] = [{"key": k, "label": v[0]}
                                 for k, v in demo.KULISSEN.items()]
@@ -914,6 +931,68 @@ class Handler(BaseHTTPRequestHandler):
                     "Erst Bausteine angeben, die vorkommen sollen"})
             params["bausteine"] = gewaehlt
             auftrag = einreihen("szenenbau", params)
+            return self._json(202, {"ok": True, "nummer": auftrag["nummer"]})
+
+        if path == "/api/sechsseiten":
+            # Ein Gegenstand, sechsmal gerade von einer Seite -- und der
+            # Katalog, in dem die Eintraege liegen. Die Bilder gehen nicht
+            # nach outputs/, deshalb hat der Reiter seine eigene Liste.
+            params = self._body()
+            if params is None:
+                return self._json(400, {"error": "ungueltiges JSON"})
+            projekt = projekte.aktiv()
+            was = params.get("tu")
+
+            if was == "liste":
+                # Der ganze Katalog, nicht nur das aktive Projekt: wer einen
+                # Gegenstand einmal von sechs Seiten hat, soll ihn im
+                # naechsten Vorhaben wiederfinden.
+                return self._json(200, {"katalog": sechsseiten.katalog(),
+                                        "seiten": [{"key": k, "label": v[0]}
+                                                   for k, v in sechsseiten.SEITEN.items()],
+                                        "projekt": projekt})
+            if was == "vorschlag":
+                # Erst anschauen, dann rechnen: das Sprachmodell schreibt den
+                # ganzen Satz Befehle, der Benutzer bessert nach. Ungesehen
+                # ins Bild gehen zu lassen, was es sich ausgedacht hat, kostet
+                # bei sechs Bildern zehn Minuten, bis der Fehler sichtbar wird.
+                if engine.lock.locked():
+                    return self._json(409, {"error": "Es laeuft gerade ein Auftrag"})
+                roh = str(params.get("text") or "").strip()
+                if not roh:
+                    return self._json(400, {"error": "Bitte den Gegenstand beschreiben"})
+                # Was schon dasteht, bleibt: der Vorschlag fuellt nur die
+                # Luecken. Wer eine Seite selbst geschrieben hat, will sie
+                # nicht ueberschrieben sehen.
+                eigen = sechsseiten.lies_eingabe(roh)
+                melden("Das Sprachmodell schreibt den Vorschlag")
+                plan = chat.seiten_plan(eigen["allgemein"] or roh,
+                                        str(params.get("modell") or "") or None)
+                melden("")
+                if not plan["sichten"]:
+                    return self._json(502, {"error":
+                        "Das Sprachmodell hat nichts geliefert."})
+                return self._json(200, {"text": sechsseiten.als_eingabe(
+                    plan["gegenstand"] or eigen["allgemein"],
+                    {**plan["sichten"], **eigen["sichten"]},
+                    {**plan["ohne"], **eigen["ohne"]},
+                    eigen["hintergrund"])})
+
+            if was == "loeschen":
+                # Loescht Bilder auf der Platte -- wie beim Projekt nur vom
+                # Rechner des Servers aus.
+                if not self._nur_hier():
+                    return self._json(403, {"error": "Nur vom Rechner des Servers aus"})
+                gut = sechsseiten.loeschen(
+                    str(params.get("projekt") or projekt),
+                    str(params.get("id") or ""))
+                return self._json(200 if gut else 404, {"ok": gut})
+
+            if not (params.get("text") or "").strip() \
+                    and not params.get("gegenstand"):
+                return self._json(400, {"error":
+                    "Bitte den Gegenstand beschreiben oder einen Baustein waehlen"})
+            auftrag = einreihen("sechsseiten", params)
             return self._json(202, {"ok": True, "nummer": auftrag["nummer"]})
 
         if path == "/api/projekt":
