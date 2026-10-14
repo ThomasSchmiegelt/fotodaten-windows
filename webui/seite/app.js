@@ -29,7 +29,7 @@ const MODES = {
               hint: () => "Das Basisbild. Welche Achsen sich ändern, stellst du unten ein."}
 };
 
-let mode = "t2i", refs = [], refPrompts = [], polling = null, maxRefs = 4, templates = {}, refBudget = 2200;
+let mode = "t2i", eigenerReiter = false, refs = [], refPrompts = [], polling = null, maxRefs = 4, templates = {}, refBudget = 2200;
 let EFFECTS = [], FORMS = [], PAINTS = [], ACTIONS = [], SUBJECTS = [],
     hasGimp = false, AXIS_OFF = "-";
 
@@ -288,6 +288,7 @@ function setMode(next) {
   // Kaesten nicht -- Prompt, Darstellung, Bildgroesse.
   const eigen = istDemo || istBausteine || istSzenen || istGeschichte
                 || istKatalog || istSeiten;
+  eigenerReiter = eigen;
   $("demoBox").style.display = istDemo ? "block" : "none";
   $("bausteinBox").style.display = istBausteine ? "block" : "none";
   // Im Ablauf-Reiter ist das Prompt-Feld ausgeblendet -- dort waere das
@@ -310,6 +311,7 @@ function setMode(next) {
   groupSizeSichtbar();
   paintPreview();
   $("variantenBox").style.display = istVarianten ? "block" : "none";
+  coverSichtbar();
   // Licht und Stil steuern im Varianten-Modus die Achsen, nicht diese Regler.
   [["light", "Licht"], ["style", "Stil"]].forEach(([id, wort]) => {
     $(id).disabled = istVarianten;
@@ -342,7 +344,30 @@ function applyOverrides(o) {
   if (o.base !== undefined) $("base").value = o.base;
   refresh();
 }
+// Die Felder fuers Titelblatt gehoeren zum Effekt, nicht zum Reiter: sie
+// erscheinen, sobald /magazine cover gewaehlt ist.
+function coverSichtbar() {
+  $("coverBox").style.display =
+    !eigenerReiter && $("effect").value === "magazine" ? "block" : "none";
+}
+
+// Was auf dem Heft stehen soll. Ist nichts ausgefuellt, geht nichts mit --
+// eine leere Maske wuerde dem Modell sagen, auf dem Titelblatt stehe kein
+// einziges Wort.
+function coverFelder() {
+  if ($("effect").value !== "magazine") return null;
+  const zeilen = $("coverZeilen").value.split("\n")
+    .map(z => z.trim()).filter(z => z);
+  const titel = $("coverTitel").value.trim();
+  if (!titel && !zeilen.length) return null;
+  return {titel: titel, untertitel: $("coverUnter").value.trim(),
+          zeilen: zeilen, ausgabe: $("coverAusgabe").value.trim(),
+          preis: $("coverPreis").value.trim(),
+          barcode: $("coverBarcode").checked};
+}
+
 $("effect").onchange = () => {
+  coverSichtbar();
   const e = EFFECTS.find(x => x.key === $("effect").value);
   if (!e) return;
   if (e.mode) setMode(e.mode);
@@ -835,6 +860,7 @@ async function start() {
     sweep: $("sweep").value, lock_seed: $("lockSeed").checked,
     view: $("view").value, effect: $("effect").value, form: $("form").value,
     keep: $("keep").value, scenario: $("scenario").value,
+    cover: coverFelder(),
     action: plan ? $("ausBildernAktion").value : $("action").value,
     group_size: parseInt($("groupSize").value, 10) || 2,
     paint: $("paint").value, palette: $("palette").value,

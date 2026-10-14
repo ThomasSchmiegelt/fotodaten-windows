@@ -34,6 +34,7 @@ import ablauf  # noqa: E402
 import demo  # noqa: E402
 import projekte  # noqa: E402
 import bausteine  # noqa: E402
+import cover  # noqa: E402
 import baender  # noqa: E402
 import szenenbau  # noqa: E402
 import sechsseiten  # noqa: E402
@@ -468,6 +469,17 @@ def _series_kwargs(params: dict, refs: list, kind: str, on_image) -> dict:
 def run_job(params: dict) -> None:
     try:
         current["translated"] = _translate_inputs(params)
+        # Die Zeilen eines Titelblatts sind Text, der ins Bild gemalt wird --
+        # sie gehen deshalb *nach* der Uebersetzung in den Prompt. Durch sie
+        # hindurch staende auf einem deutschen Heft Englisches.
+        #
+        # Und als vollstaendige Anweisung statt als Zusatz: die feste
+        # Anweisung des Effekts verlangt einen Barcode, auch wenn die Maske
+        # keinen will. Sie faellt deshalb weg.
+        if cover.gefuellt(params.get("cover")):
+            params["prompt"] = cover.anweisung(params["cover"],
+                                               params.get("prompt", ""))
+            params["effect"] = ""
         refs = [decode(d) for d in (params.get("images") or []) if d]
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         kind = params.get("mode") or ("edit" if refs else "t2i")

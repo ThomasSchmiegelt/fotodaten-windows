@@ -590,6 +590,46 @@
       <p class="hint" id="demoDauer"></p>
     </fieldset>
 
+    <fieldset id="coverBox" style="display:none">
+      <legend>Titelblatt</legend>
+      <p class="hint">Was hier steht, steht hinterher auf dem Heft. Bleibt
+        die Maske leer, erfindet das Modell die Schrift selbst — und das
+        ergibt Kauderwelsch wie „WALD ARAS“. Umlaute ruhig als
+        <b>ä ö ü</b> schreiben, die kommen richtig an.</p>
+      <div class="axis">
+        <div>
+          <label for="coverTitel">Titel des Magazins</label>
+          <input id="coverTitel" placeholder="ORBIT">
+        </div>
+        <div>
+          <label for="coverAusgabe">Ausgabe</label>
+          <input id="coverAusgabe" placeholder="10/2026">
+        </div>
+      </div>
+      <label for="coverUnter">Zeile unter dem Titel</label>
+      <input id="coverUnter" placeholder="Das Magazin für Raumfahrt">
+      <label for="coverZeilen">Artikel — eine Zeile je Schlagzeile</label>
+      <textarea id="coverZeilen" style="min-height:70px"
+        placeholder="Der Blick von unten&#10;Sechs Seiten eines Satelliten&#10;40 Meter Spannweite"></textarea>
+      <p class="hint">Die <b>erste</b> Zeile wird die große Schlagzeile, die
+        übrigen stehen kleiner daneben. Höchstens sechs — ein Titelblatt mit
+        zehn Zeilen wird unleserlich.</p>
+      <div class="axis">
+        <div>
+          <label for="coverPreis">Preis</label>
+          <input id="coverPreis" placeholder="9,80 €">
+        </div>
+        <div>
+          <label class="check" style="margin-top:22px">
+            <input type="checkbox" id="coverBarcode" checked>
+            Barcode unten rechts</label>
+        </div>
+      </div>
+      <p class="hint">Das Bild oben unter <b>Referenzbilder</b> wird das
+        Titelbild und bleibt, wie es ist. Aus dem Reiter <b>Sechs Seiten</b>
+        lädt <i>Vorderansicht als Vorlage</i> es mit einem Klick.</p>
+    </fieldset>
+
     <fieldset id="gruppeBox" style="display:none">
       <legend>Gruppe</legend>
       <label for="action">Was soll geschehen?</label>

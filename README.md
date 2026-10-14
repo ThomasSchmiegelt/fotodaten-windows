@@ -394,7 +394,21 @@ Oberflächenspuren und Kontaktschatten, bei unveränderter Geometrie),
 Volumenkörper, scharfe Kanten, keine Spiegelungen),
 `/upscale` (dasselbe Bild in 2048er Kantenlänge, mit ausgezeichneten
 Strukturen statt geglätteter Kanten), `/magazine cover`, `/360 View` und
-weitere. Kurzbefehle lassen sich direkt in
+weitere.
+
+Zum **Magazin-Cover** gehört eine eigene Eingabemaske: Titel, Zeile darunter,
+Artikel (eine je Zeile, die erste wird die große Schlagzeile), Ausgabe, Preis
+und ein Barcode zum Abwählen. Das ist kein Beiwerk — ohne Vorgabe erfindet
+das Modell die Schrift, und zwar als Kauderwelsch: auf dem ersten Versuch
+stand „WALD ARAS“ als Titel und „SRDVIS ZYABRNTS“ als Schlagzeile. Vorgegeben
+schreibt Qwen-Image sie dagegen sauber, Umlaute und Eurozeichen
+eingeschlossen.
+
+Zwei Feinheiten dabei: die Zeilen gehen **nicht** durch die Übersetzung — sie
+werden ins Bild gemalt, und auf einem deutschen Heft stünde sonst Englisches.
+Und der Prompt endet mit dem Satz, dass jedes Wort auf dem Titelblatt eines
+der genannten ist; ohne ihn füllt das Modell den freien Platz weiter mit
+erfundener Schrift. Kurzbefehle lassen sich direkt in
 das Prompt-Feld tippen und stellen die Regler selbst um.
 
 **Deutsch überall.** Prompt, „was unverändert bleiben muss", „was umgefärbt
@@ -610,6 +624,7 @@ webui/sprache/        Ollama: deuten.py (Freitext), uebersetzen.py,
                       Seiten), ollama.py (der Aufruf)
 webui/szenenbau.py    eine Szene in Stufen: Kulisse, Posen, Zusammensetzen
 webui/sechsseiten.py  sechs Ansichten eines Gegenstands und ihr Katalog
+webui/cover.py        die Eingabemaske fuer ein Titelblatt
 webui/ablauf.py       Abläufe als Blöcke, mitgelieferte Folgen
 webui/demo.py         Startbild-Vorgabe und Videobau
 webui/pruefung.py     Oberfläche gegen den Server prüfen
