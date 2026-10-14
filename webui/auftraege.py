@@ -223,14 +223,35 @@ def _buendelbar(a: dict, b: dict) -> bool:
 
 
 def _fertiger_prompt(params: dict) -> tuple[str, int]:
-    """Prompt und Seed eines Auftrags, so wie `plan()` sie bauen wuerde.
+    """Prompt und Seed eines Auftrags, so wie die Maschine sie bauen wuerde.
 
-    Ueber `plan()` statt von Hand: die Achsenliste waechst, und zwei Stellen,
-    die denselben Text bauen, laufen frueher oder spaeter auseinander.
+    Ueber `rahmen()` und `plan()` statt von Hand: die Achsenliste waechst,
+    und zwei Stellen, die denselben Text bauen, laufen frueher oder spaeter
+    auseinander.
+
+    `rahmen()` stand hier lange nicht, und das war ein Fehler: wer einen
+    Effekt waehlte *und* etwas ins Prompt-Feld schrieb, bekam einen Auftrag
+    mit fertigem Prompt -- und `run_series` ueberspringt den Vorlagenblock,
+    sobald einer vorliegt. Die Anweisung des Effekts fiel damit still unter
+    den Tisch. Ohne Text im Feld ging es gut, was die Suche nicht leichter
+    gemacht haette.
     """
     seed = int(params.get("seed", 42))
+    text = Engine.rahmen(
+        params.get("prompt", ""),
+        mode=params.get("mode") or "t2i",
+        effect=params.get("effect") or None,
+        form=params.get("form") or None,
+        transparent=bool(params.get("transparent", False)),
+        keep=params.get("keep") or "The main subject",
+        action=params.get("action") or "zusammen",
+        group_size=int(params.get("group_size") or 2),
+        bilder=len(params.get("images") or []),
+        image_prompts=params.get("image_prompts") or [],
+        subject=params.get("subject") or "fahrzeug",
+        haltung=params.get("haltung") or None)
     auftragsliste = Engine.plan(
-        params.get("prompt", ""), 1, seed, None,
+        text, 1, seed, None,
         subject=params.get("subject") or "fahrzeug",
         paint_target=params.get("paint_target") or "",
         **{k: params.get(k) or None for k in ACHSEN})

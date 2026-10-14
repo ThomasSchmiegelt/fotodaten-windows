@@ -316,6 +316,59 @@ class Engine:
         return jobs
 
     # -- Generierung ------------------------------------------------------
+    @staticmethod
+    def rahmen(prompt: str, mode: str = "t2i", effect=None, form=None,
+               transparent: bool = False, keep: str = "The main subject",
+               action: str = "zusammen", group_size: int = 2,
+               bilder: int = 0, image_prompts: list | None = None,
+               subject: str = "fahrzeug", haltung=None) -> str:
+        """Den Benutzertext in seine Vorlage legen: Effekt, Form, Modus.
+
+        Eine eigene Methode, weil zwei Wege sie brauchen. `run_series` baut
+        den Text damit, und `auftraege._fertiger_prompt` muss denselben Text
+        bauen, bevor der Torwaechter darueberliest -- sonst reicht es einen
+        Prompt weiter, in dem die Anweisung des Effekts fehlt, und das Bild
+        wird ein ganz anderes.
+        """
+        text = (prompt or "").strip()
+        if form in FORMS:
+            text = FORMS[form]["template"].format(extra=text)
+        spec = EFFECTS.get(effect or "", {})
+        if spec.get("instruction"):
+            # Die Anweisung steht vorn, der Benutzertext praezisiert sie.
+            text = f"{spec['instruction']} {text}".strip()
+        if mode == "gruppe":
+            # Zusammenstellen, ergaenzen und entfernen brauchen je eigene Worte.
+            spec_action = GROUP_ACTIONS.get(action) or GROUP_ACTIONS["zusammen"]
+            if bilder < spec_action["min"]:
+                raise ValueError(
+                    f"„{spec_action['label']}“ braucht mindestens "
+                    f"{spec_action['min']} Referenzbild(er).")
+            if action == "entfernen" and not text:
+                raise ValueError("Bitte beschreiben, wer entfernt werden soll.")
+            zusatz = max(bilder - 1, 1)
+            text = spec_action["template"].format(
+                n=bilder, m=zusatz, extra=text,
+                total=max(group_size, 1) + zusatz)
+            # Rollen je Referenzbild: "Person aus Bild 2 als Ritter darstellen".
+            rollen = [f"Depict the person from reference image {i + 1} as {d.strip()}"
+                      for i, d in enumerate(image_prompts or []) if d and d.strip()]
+            if rollen:
+                text = f"{text} {'. '.join(rollen)}."
+        elif mode in TEMPLATES:
+            if not bilder:
+                raise ValueError("Fuer diesen Modus werden Referenzbilder gebraucht.")
+            # Soll sich die Haltung aendern, darf die Vorlage nicht zugleich
+            # "nicht bewegen" verlangen -- sonst entstehen doppelte Beine.
+            vorlage = TEMPLATES[mode]
+            if mode == "varianten" and subject == "person" and haltung != AXIS_OFF:
+                vorlage = VARIANT_TEMPLATE_POSE
+            text = vorlage.format(
+                n=bilder, extra=text, keep=keep.strip() or "The main subject")
+        if transparent:
+            text = TRANSPARENT_TEMPLATE.format(extra=text)
+        return text
+
     def run_series(
         self,
         prompt: str,
@@ -366,43 +419,11 @@ class Engine:
         if len(images) > MAX_REFERENCES:
             raise ValueError(f"Hoechstens {MAX_REFERENCES} Referenzbilder moeglich.")
 
-        text = prompt.strip()
-        if form in FORMS:
-            text = FORMS[form]["template"].format(extra=text)
-        spec = EFFECTS.get(effect or "", {})
-        if spec.get("instruction"):
-            # Die Anweisung steht vorn, der Benutzertext praezisiert sie.
-            text = f"{spec['instruction']} {text}".strip()
-        if mode == "gruppe":
-            # Zusammenstellen, ergaenzen und entfernen brauchen je eigene Worte.
-            spec_action = GROUP_ACTIONS.get(action) or GROUP_ACTIONS["zusammen"]
-            if len(images) < spec_action["min"]:
-                raise ValueError(
-                    f"„{spec_action['label']}“ braucht mindestens "
-                    f"{spec_action['min']} Referenzbild(er).")
-            if action == "entfernen" and not text:
-                raise ValueError("Bitte beschreiben, wer entfernt werden soll.")
-            zusatz = max(len(images) - 1, 1)
-            text = spec_action["template"].format(
-                n=len(images), m=zusatz, extra=text,
-                total=max(group_size, 1) + zusatz)
-            # Rollen je Referenzbild: "Person aus Bild 2 als Ritter darstellen".
-            rollen = [f"Depict the person from reference image {i + 1} as {d.strip()}"
-                      for i, d in enumerate(image_prompts or []) if d and d.strip()]
-            if rollen:
-                text = f"{text} {'. '.join(rollen)}."
-        elif mode in TEMPLATES:
-            if not images:
-                raise ValueError("Fuer diesen Modus werden Referenzbilder gebraucht.")
-            # Soll sich die Haltung aendern, darf die Vorlage nicht zugleich
-            # "nicht bewegen" verlangen -- sonst entstehen doppelte Beine.
-            vorlage = TEMPLATES[mode]
-            if mode == "varianten" and subject == "person" and haltung != AXIS_OFF:
-                vorlage = VARIANT_TEMPLATE_POSE
-            text = vorlage.format(
-                n=len(images), extra=text, keep=keep.strip() or "The main subject")
-        if transparent:
-            text = TRANSPARENT_TEMPLATE.format(extra=text)
+        text = self.rahmen(
+            prompt, mode=mode, effect=effect, form=form,
+            transparent=transparent, keep=keep, action=action,
+            group_size=group_size, bilder=len(images),
+            image_prompts=image_prompts, subject=subject, haltung=haltung)
 
         if prompts:
             # Fertige Prompts, einer je Bild. Damit laesst sich eine ganze Folge
