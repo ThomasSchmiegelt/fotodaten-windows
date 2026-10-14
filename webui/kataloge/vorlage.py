@@ -121,6 +121,21 @@ EFFECTS = {
                        "including a contact shadow on the surface it rests on, and the "
                        "shallow depth of field of a real camera.",
     },
+    "cad": {
+        # Der Gegenpart zu /cad2real. Dass das Modell CAD-Darstellungen kennt,
+        # zeigt der umgekehrte Weg -- hier muss es die Materialien nur
+        # weglassen statt sie zu erfinden. Laengere Aliase werden zuerst
+        # geprueft, "/cad" haengt sich also nicht an "/cad2real".
+        "alias": "/cad", "label": "Foto zu CAD", "needs_image": True,
+        "instruction": "Turn this into a CAD rendering of the same object: an "
+                       "untextured solid model in uniform light grey, every "
+                       "edge drawn as a crisp darker line, flat even shading "
+                       "without reflections, highlights, grain or depth of "
+                       "field, on a plain pale background with a faint "
+                       "construction grid. Keep the geometry, the proportions "
+                       "and every part exactly as in the photograph -- a CAD "
+                       "view shows the same object, not a new design.",
+    },
     "upscale": {
         # Qwen-Image 2.1 ist kein Skalierer: es zeichnet das Bild in der
         # groesseren Kantenlaenge neu. Das Ergebnis ist deshalb nicht
