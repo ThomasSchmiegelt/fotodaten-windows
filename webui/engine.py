@@ -46,6 +46,12 @@ MAX_REFERENCES = 4
 # die Aufmerksamkeit waechst quadratisch damit. Ueber diesem Budget geht der 24-GB-
 # Karte die Luft aus, deshalb werden mehrere Referenzen intern kleiner eingelesen.
 REFERENCE_TOKEN_BUDGET = 2200
+# Bis zu dieser Bildflaeche dekodiert die VAE in einem Stueck. Darueber
+# kachelweise, sonst reicht der Platz neben dem Transformer nicht. Ein
+# Quadrat von 1024 liegt genau auf der Grenze und geht damit ungekachelt
+# durch -- dort sind die Kachelwolken am sichtbarsten, weil ein Katalogbild
+# viel glatte Flaeche hat.
+VOLLBILD = int(os.environ.get("QWEN_VOLLBILD", 1024 * 1024))
 
 
 def reference_resolution(base: int, count: int) -> int:
@@ -215,14 +221,19 @@ class Engine:
         self.aborted = True
 
     # -- Laden ------------------------------------------------------------
-    def _load(self, **skip):
+    def _load(self, kacheln: bool = True, **skip):
         pipe = _StagedPipeline.from_pretrained(REPO, dtype=DTYPE, **skip)
         pipe.to(DEVICE)
         if getattr(pipe, "vae", None) is not None:
-            # Der Transformer belegt waehrend des Dekodierens noch ~14 GB, deshalb
-            # kachelweise en-/dekodieren statt das ganze Bild auf einmal.
-            pipe.vae.enable_tiling()
+            # Slicing teilt nur den Stapel und kostet nichts an Bildqualitaet.
             pipe.vae.enable_slicing()
+            # Kacheln dagegen zerlegt das Bild in Flaechen und setzt sie
+            # ueberblendet wieder zusammen. Harte Naehte gibt das nicht --
+            # aber weiche Helligkeitsunterschiede auf Kachelgroesse, und die
+            # sieht man auf einer glatten hellen Flaeche als Wolken und
+            # senkrechte Schlieren. Deshalb nur, wo der Platz es verlangt.
+            if kacheln:
+                pipe.vae.enable_tiling()
         return pipe
 
     # -- Planung ----------------------------------------------------------
@@ -467,7 +478,7 @@ class Engine:
 
         # --- Phase 2: entrauschen und dekodieren --------------------------
         self._set(state="loading", message="Transformer + VAE werden geladen")
-        pipe = self._load(text_encoder=None)
+        pipe = self._load(text_encoder=None, kacheln=width * height > VOLLBILD)
         results = []
 
         try:
