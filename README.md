@@ -5,7 +5,8 @@ Text zu Bild, Bildbearbeitung, Gruppenbilder und Serien mit
 Rechner; Sprach- und Bildmodell lassen sich wahlweise auf eine
 OpenAI-kompatible Cloud-Schnittstelle umstellen. Dazu eine Freitexteingabe auf
 Deutsch, ein GIMP-Plugin und eine Kette für **Trainingsdaten**: Varianten
-erzeugen, Bounding Boxes automatisch setzen und prüfen, YOLO trainieren.
+erzeugen, Bounding Boxes automatisch setzen und prüfen, einen Detektor
+(D-FINE) trainieren.
 
 **Wie man damit arbeitet, steht in der [Bedienungsanleitung](ANLEITUNG.md).**
 Diese README erklärt, wie es gebaut ist und warum.
@@ -66,19 +67,11 @@ Qwen-Image 2.1 braucht `diffusers` von `main`; die Version in `requirements.txt`
 ist auf den geprüften Stand festgenagelt. Beim ersten Start lädt das Modell
 rund 31 GB in den Hugging-Face-Cache.
 
-**Für das YOLO-Training** eine zweite, schlanke Umgebung. Sie bringt nur
-Ultralytics mit und nutzt das PyTorch aus `qwen_bild` über eine `.pth`-Datei
-mit — das spart rund 5 GB, und `qwen_bild` bleibt unberührt:
-
-```bash
-python3 -m venv yolo_umgebung
-./qwen_bild/bin/python -c "import site; print(site.getsitepackages()[0])" \
-  > "$(./yolo_umgebung/bin/python -c 'import site; print(site.getsitepackages()[0])')/qwen_bild_torch.pth"
-./yolo_umgebung/bin/pip install ultralytics
-```
-
-Die Box-Modelle für die Trainingsdaten (Qwen3-VL-2B, Grounding DINO, zusammen
-rund 5 GB) lädt das Programm beim ersten Gebrauch selbst.
+Die Modelle für Trainingsdaten und Detektor — Qwen3-VL-2B und Grounding DINO
+für die Boxen, D-FINE zum Trainieren — lädt das Programm beim ersten Gebrauch
+selbst, zusammen rund 5 GB. Sie laufen mit dem schon installierten
+`transformers`; das Training braucht zusätzlich `scipy` (steht in
+`requirements.txt`).
 
 ## Starten
 
@@ -653,7 +646,8 @@ webui/sechsseiten.py  sechs Ansichten eines Gegenstands und ihr Katalog
 webui/cover.py        die Eingabemaske fuer ein Titelblatt
 webui/cloud.py        Sprach- und Bildmodell ueber eine OpenAI-kompatible API
 webui/datensatz.py    Bounding Boxes (Qwen3-VL + Grounding DINO), YOLO/COCO
-webui/yolo.py         YOLO-Training in yolo_umgebung/, Laeufe, Ausprobieren
+webui/detektor.py     Detektor-Training (D-FINE): Aufteilung, Laeufe, Ausprobieren
+webui/detektor_lauf.py  das Training selbst, als eigener Prozess; mAP-Berechnung
 webui/ablauf.py       Abläufe als Blöcke, mitgelieferte Folgen
 webui/demo.py         Startbild-Vorgabe und Videobau
 webui/pruefung.py     Oberfläche gegen den Server prüfen
@@ -696,10 +690,40 @@ Zwei Pflichten aus dieser Lizenz betreffen typische Nutzung dieses Werkzeugs:
 Qwen is licensed under the Qwen RESEARCH LICENSE AGREEMENT, Copyright (c) 2026
 Hangzhou Tongyi Laboratory Technology Co., Ltd. All Rights Reserved.
 
-### Die Sprachmodelle ebenfalls
+### Die übrigen Modelle und Bibliotheken
 
-Die Freitextdeutung und die Übersetzung laufen über Ollama. Welches Modell du
-dort einsetzt, bestimmst du selbst — dessen Lizenz gilt dann für dich, nicht
-die dieses Repositories.
+Keines davon liegt im Repository; geladen bzw. installiert werden sie beim
+ersten Gebrauch, und es gilt jeweils deren eigene Lizenz.
+
+| Bestandteil | Wofür | Lizenz | Kommerziell |
+|---|---|---|---|
+| Qwen-Image 2.1 | Bilder erzeugen und bearbeiten | Qwen Research License | **nein** (siehe oben) |
+| Qwen3-VL-2B-Instruct | Bounding Box setzen | Apache 2.0 | ja |
+| Grounding DINO (base) | Bounding Box gegenprüfen | Apache 2.0 | ja |
+| D-FINE (nano/small/medium, COCO) | Detektor trainieren | Apache 2.0 | ja — auch die trainierten Gewichte |
+| diffusers, transformers, accelerate, huggingface_hub, safetensors | Grundlage | Apache 2.0 | ja |
+| PyTorch, torchvision | Grundlage | BSD-3-Clause | ja |
+| SciPy | Training | BSD-3-Clause | ja |
+| Pillow | Bilder lesen und schreiben | MIT-CMU | ja |
+| Sprachmodell über Ollama oder Cloud | Übersetzen, Prompts | je nach gewähltem Modell bzw. Anbieter | prüfen |
+
+**Warum D-FINE und nicht Ultralytics YOLO.** Ultralytics steht unter
+AGPL-3.0 und zählt nach eigener Auslegung auch die damit trainierten Gewichte
+dazu: ein Detektor aus diesem Werkzeug wäre selbst AGPL oder bräuchte deren
+kostenpflichtige Lizenz. D-FINE ist ein Echtzeit-Detektor derselben Klasse
+unter Apache 2.0, und es kommt mit `transformers`, das ohnehin installiert
+ist. Der Datensatz wird trotzdem auch im YOLO-Format abgelegt.
+
+**Für die Kette Trainingsdaten → Detektor heißt das:** Das Training und die
+Gewichte sind frei. Die *Bilder* aber stammen von Qwen-Image 2.1 — wer einen
+damit trainierten Detektor kommerziell nutzen will, braucht für das Bildmodell
+eine Lizenz von Tongyi oder erzeugt die Bilder mit einem Modell, dessen
+Lizenz das erlaubt (etwa über **Cloud-Modelle**).
+
+### Mitmachen
+
+[CONTRIBUTING.md](CONTRIBUTING.md) sagt, wie Fehlermeldungen und Änderungen
+willkommen sind, [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) gilt für den Umgang
+miteinander, [SECURITY.md](SECURITY.md) für Sicherheitslücken.
 
 *Dies ist eine Zusammenfassung nach bestem Wissen, keine Rechtsberatung.*

@@ -12,7 +12,7 @@ der [README](README.md).
 4. [Bilder bearbeiten und Effekte](#4-bilder-bearbeiten-und-effekte)
 5. [Gruppe und Rundum](#5-gruppe-und-rundum)
 6. [Varianten](#6-varianten)
-7. [Trainingsdaten für YOLO — die ganze Kette](#7-trainingsdaten-für-yolo--die-ganze-kette)
+7. [Trainingsdaten und eigener Detektor — die ganze Kette](#7-trainingsdaten-und-eigener-detektor--die-ganze-kette)
 8. [Sechs Seiten eines Gegenstands](#8-sechs-seiten-eines-gegenstands)
 9. [Bausteine, Szenen, Katalog](#9-bausteine-szenen-katalog)
 10. [Geschichten und Abläufe](#10-geschichten-und-abläufe)
@@ -76,11 +76,11 @@ nächsten Auftrags.
 | Katalog | alle Bausteine aus allen Projekten |
 | Sechs Seiten | ein Gegenstand von vorn, hinten, links, rechts, oben, unten |
 | Datensatz | Bounding Boxes prüfen, aufnehmen, korrigieren |
-| Training | YOLO trainieren und ausprobieren |
+| Training | einen Detektor (D-FINE) trainieren und ausprobieren |
 
 **Der große Knopf unten** startet, was der Reiter verspricht. Seine
-Beschriftung sagt es jeweils („Erzeugen“, „Erstes Bild erzeugen“, „YOLO
-trainieren“ …).
+Beschriftung sagt es jeweils („Erzeugen“, „Erstes Bild erzeugen“,
+„Detektor trainieren“ …).
 
 **Warteschlange.** Ein Auftrag wird eingereiht, nicht abgewiesen: abschicken,
 weiterarbeiten, den nächsten anhängen. Während etwas rechnet, heißt der Knopf
@@ -223,14 +223,21 @@ gewürfelten Werten je Bild.
 
 ---
 
-## 7. Trainingsdaten für YOLO — die ganze Kette
+## 7. Trainingsdaten und eigener Detektor — die ganze Kette
 
 Ziel: viele abwechslungsreiche Bilder eines Objekts, jedes mit einer
-**Bounding Box**, und daraus ein **YOLO-Detektor**. Beispiel: eine
-Anhängerkupplung.
+**Bounding Box**, und daraus ein **Detektor**, der das Objekt in echten Fotos
+findet. Beispiel: eine Anhängerkupplung.
+
+Trainiert wird **D-FINE** — ein Echtzeit-Detektor in der Klasse von YOLO,
+aber unter **Apache 2.0**: das Modell *und* die damit trainierten Gewichte
+dürfen frei weitergegeben und auch kommerziell genutzt werden. (Ultralytics
+YOLO steht unter AGPL-3.0, und Ultralytics zählt trainierte Gewichte mit
+dazu.) Der Datensatz wird trotzdem auch im YOLO-Format abgelegt — wer mag,
+kann ihn mit jedem Werkzeug weiterverwenden.
 
 ```
- Basisbild ──► Varianten ──► Box suchen ──► Datensatz prüfen ──► YOLO trainieren ──► am Foto testen
+ Basisbild ──► Varianten ──► Box suchen ──► Datensatz prüfen ──► Detektor trainieren ──► am Foto testen
                 (Reiter       (automatisch)   (Reiter              (Reiter
                 Varianten)                    Datensatz)            Training)
 ```
@@ -281,39 +288,46 @@ Reiter **Datensatz**, oben die Zahlen, darunter die Bilder:
 *verworfen* — auch aufgenommene Bilder lassen sich so noch korrigieren.
 
 **Wichtig:** nur aufgenommene Bilder gehen ins Training. Bilder ohne Box
-liegen bewusst nicht dort, wo YOLO sucht — ein Bild ohne Label hieße für YOLO
+liegen bewusst nicht im Trainingsordner — ein Bild ohne Label hieße dort
 „hier ist keine Kupplung“.
 
-### Schritt 4 — YOLO trainieren
+### Schritt 4 — Detektor trainieren
 
 Reiter **Training**. Die Einstellungen stehen als Tabelle:
 
 | Feld | Empfehlung |
 |---|---|
-| Modell | **yolo11n** (Nano) zum Anfangen; Small/Medium erst ab einigen hundert Bildern |
-| Epochen | 50–100 |
+| Modell | **dfine-nano** zum Anfangen; Small/Medium erst ab einigen hundert Bildern |
+| Epochen | 50–100 (Vorgabe 80) |
 | Bildgröße | 640; **960**, wenn das Objekt klein im Bild ist |
 | Validierung | 20 % — dieser Teil wird nicht trainiert, nur gemessen |
 
-Dann der große Knopf **YOLO trainieren**. Das Training reiht sich in die
+Dann der große Knopf **Detektor trainieren**. Das Training reiht sich in die
 Warteschlange ein (es braucht die Grafikkarte); die Statuszeile zeigt Epoche
 und mAP50.
 
 Bilder aus demselben Auftrag bleiben bei der Aufteilung zusammen — sonst
-erkennt YOLO in der Validierung nur den Nachbarn aus derselben Serie wieder
+erkennt das Modell in der Validierung nur den Nachbarn aus derselben Serie wieder
 und die Zahlen wären geschönt.
 
 **Die Ergebnistabelle** zeigt je Lauf:
 
 | Spalte | Bedeutung |
 |---|---|
+| Bilder | Training / Validierung |
 | Präzision | wie oft eine gemeldete Box stimmt |
 | Trefferquote | wie viele Objekte gefunden werden |
 | **mAP50** | die übliche Hauptzahl — 1,0 hieße alles gefunden und richtig umrandet |
 | mAP50-95 | strenger: verlangt auch genau sitzende Ränder |
 
-**Kurven** klappt Lernkurven, Vorhersagen auf den Validierungsbildern und die
-Konfusionsmatrix auf.
+Präzision und Trefferquote werden an der Sicherheitsschwelle gemessen, bei
+der beide zusammen am besten sind. **Kurve** klappt die Lernkurve (mAP je
+Epoche) und vier Validierungsbilder auf: grün die Wahrheit, rot die
+Vorhersage.
+
+**Zu wenige Epochen** erkennt man an den Beispielbildern: das Modell meldet
+dann noch, was es aus seinem Vortraining kennt — Kennzeichen, Rücklichter —
+statt der Kupplung.
 
 ### Schritt 5 — am Foto ausprobieren
 
@@ -324,21 +338,32 @@ deshalb auch, während die Grafikkarte rechnet.
 
 ### Das fertige Modell außerhalb nutzen
 
-Die Gewichte liegen unter `projekte/<Projekt>/yolo/<Lauf>/weights/best.pt`:
+Das trainierte Modell liegt unter `projekte/<Projekt>/detektor/<Lauf>/gewichte/`
+im Hugging-Face-Format und lässt sich mit `transformers` laden:
 
-```bash
-./yolo_umgebung/bin/yolo detect predict model=projekte/training/yolo/<Lauf>/weights/best.pt source=foto.jpg
+```python
+from transformers import AutoImageProcessor, AutoModelForObjectDetection
+from PIL import Image
+
+ordner = "projekte/training/detektor/<Lauf>/gewichte"
+prozessor = AutoImageProcessor.from_pretrained(ordner)
+modell = AutoModelForObjectDetection.from_pretrained(ordner)
+bild = Image.open("foto.jpg").convert("RGB")
+aus = modell(**prozessor(images=bild, return_tensors="pt"))
+treffer = prozessor.post_process_object_detection(
+    aus, threshold=0.25, target_sizes=[bild.size[::-1]])[0]
+print(treffer["boxes"], treffer["scores"])
 ```
 
 Der Datensatz selbst liegt in `projekte/<Projekt>/datensatz/` und ist
-**YOLO- und COCO-Format** zugleich:
+**YOLO- und COCO-Format** zugleich — für jedes andere Werkzeug:
 
 | Datei | Inhalt |
 |---|---|
-| `images/`, `labels/` | Bilder und YOLO-Labels (je Bild eine `.txt`) |
-| `data.yaml` | Klassenliste für Ultralytics |
-| `train.txt`, `val.txt`, `yolo.yaml` | die Aufteilung des letzten Trainings |
+| `images/`, `labels/` | Bilder und Labels im YOLO-Format (je Bild eine `.txt`) |
+| `data.yaml` | Klassenliste im YOLO-Format |
 | `annotations.json` | dasselbe im COCO-Format |
+| `train.txt`, `val.txt` | die Aufteilung des letzten Trainings |
 | `pruefen/`, `verworfen/` | Bilder, die (noch) nicht im Training sind |
 | `eintraege.json` | je Bild: Box, Status, Gründe, Prompt, gewürfelte Werte |
 
@@ -494,7 +519,7 @@ Gut zu wissen:
 - Einstellen lässt sich das nur am Rechner des Servers, nicht übers Netz.
 - **Cloud-Bilder kosten Geld** und sind nicht wiederholbar: Seed und
   „Was nicht ins Bild soll … auch dem Modell ausreden“ wirken dort nicht.
-- Die Box-Erkennung für Trainingsdaten und das YOLO-Training laufen immer
+- Die Box-Erkennung für Trainingsdaten und das Detektor-Training laufen immer
   lokal.
 
 ---
@@ -509,13 +534,12 @@ trotzdem am richtigen Ort.
 |---|---|
 | `outputs/` | Bilder des Projekts **Allgemein** |
 | `projekte/<Projekt>/bilder/` | Bilder aller anderen Projekte |
-| `projekte/<Projekt>/datensatz/` | Trainingsdaten (YOLO + COCO) |
-| `projekte/<Projekt>/yolo/` | YOLO-Läufe mit Gewichten und Kurven |
+| `projekte/<Projekt>/datensatz/` | Trainingsdaten (YOLO- und COCO-Format) |
+| `projekte/<Projekt>/detektor/` | Trainingsläufe mit Gewichten und Kennzahlen |
 | `projekte/<Projekt>/geschichten/` | Geschichten als JSON |
 | `projekte/<Projekt>/bewertung.json` | Sterne, Namen, Notizen |
 | `katalog/<Projekt>/` | Sechs-Seiten-Ansichten |
 | `einstellungen.json` | Cloud-Zugänge (privat) |
-| `yolo_umgebung/` | Ultralytics, eigene Python-Umgebung |
 
 Jedes Bild trägt seinen **Prompt und Seed im PNG** — auch nach Jahren lässt
 sich nachsehen, wie es entstanden ist.
@@ -568,8 +592,9 @@ Meist ist der Suchbegriff zu allgemein oder zu speziell. Englisch und so, wie
 man das Objekt einem Fremden nennen würde: `tow hitch`, nicht
 `anhaengerkupplung` oder `ball neck with socket`.
 
-**YOLO-Werte nahe null**
-Zu wenige Bilder. Mit unter 50 aufgenommenen Bildern lernt YOLO nichts
+**Kennzahlen nahe null**
+Zu wenige Bilder oder zu wenige Epochen. Mit unter 50 aufgenommenen Bildern
+lernt der Detektor nichts
 Brauchbares.
 
 **Oben erscheint ein Balken „Der Server läuft noch mit älterem Code“**
