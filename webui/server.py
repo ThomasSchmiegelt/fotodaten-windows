@@ -41,7 +41,7 @@ import ablauf  # noqa: E402
 import demo  # noqa: E402
 import cloud  # noqa: E402
 import datensatz  # noqa: E402
-import yolo  # noqa: E402
+import detektor  # noqa: E402
 import sechsseiten  # noqa: E402
 from kataloge import (  # noqa: E402
     AXIS_OFF, EFFECTS, EINSTELLUNGEN, FOLGEN, GEZEICHNET, GROUP_ACTIONS,
@@ -240,10 +240,10 @@ class Handler(BaseHTTPRequestHandler):
             with open(datei, "rb") as fh:
                 return self._send(200, fh.read(), "image/png")
 
-        if path.startswith("/yolo/"):
-            # Kurven und Beispielbilder eines Trainingslaufs.
-            teile = path[len("/yolo/"):].split("/")
-            datei = yolo.bildpfad(*teile) if len(teile) == 3 else None
+        if path.startswith("/detektor/"):
+            # Beispielbilder eines Trainingslaufs.
+            teile = path[len("/detektor/"):].split("/")
+            datei = detektor.bildpfad(*teile) if len(teile) == 3 else None
             if not datei:
                 return self._json(404, {"error": "not found"})
             with open(datei, "rb") as fh:
@@ -1029,7 +1029,7 @@ class Handler(BaseHTTPRequestHandler):
             auftrag = einreihen("sechsseiten", params)
             return self._json(202, {"ok": True, "nummer": auftrag["nummer"]})
 
-        if path == "/api/yolo":
+        if path == "/api/detektor":
             params = self._body()
             if params is None:
                 return self._json(400, {"error": "ungueltiges JSON"})
@@ -1037,22 +1037,20 @@ class Handler(BaseHTTPRequestHandler):
             was = params.get("tu") or "liste"
             if was == "liste":
                 z = datensatz.uebersicht(projekt)["zahlen"]
-                return self._json(200, {"projekt": projekt, "da": yolo.verfuegbar(),
-                                        "modelle": [{"key": k, "label": v}
-                                                    for k, v in yolo.MODELLE.items()],
+                return self._json(200, {"projekt": projekt,
+                                        "modelle": [{"key": k, "label": v[1]}
+                                                    for k, v in detektor.MODELLE.items()],
                                         "aufgenommen": z.get("ok", 0),
-                                        "laeufe": yolo.laeufe(projekt)})
+                                        "laeufe": detektor.laeufe(projekt)})
             if was == "starten":
-                if not yolo.verfuegbar():
-                    return self._json(400, {"error": "Die YOLO-Umgebung fehlt"})
-                auftrag = einreihen("yolo", params)
+                auftrag = einreihen("detektor", params)
                 return self._json(202, {"ok": True, "nummer": auftrag["nummer"]})
             if was == "ausprobieren":
                 try:
                     bild = decode(params.get("bild") or "")
                     puffer = io.BytesIO()
                     bild.convert("RGB").save(puffer, format="PNG")
-                    boxen = yolo.erkennen(projekt, str(params.get("lauf") or ""),
+                    boxen = detektor.erkennen(projekt, str(params.get("lauf") or ""),
                                           puffer.getvalue(),
                                           float(params.get("schwelle") or 0.25))
                 except Exception as exc:

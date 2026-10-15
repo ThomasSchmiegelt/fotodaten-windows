@@ -567,11 +567,19 @@
 .dsbild figcaption a { margin-right: 8px; }
 .dsgrund { color: #ffb347; }
 
-/* YOLO: Einstellungen und Laeufe als Tabellen. */
-.yolotab { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12.5px; }
-.yolotab th, .yolotab td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-.yolotab th { color: var(--muted); font-weight: 500; white-space: nowrap; }
-.yolotab td input, .yolotab td select { width: auto; min-width: 90px; }
-.yololaeufe td { white-space: nowrap; }
-.yolodetails td { white-space: normal; }
-.yolodetails img { max-width: 48%; margin: 6px 6px 0 0; border-radius: 6px; }
+/* Detektor-Training: Einstellungen und Laeufe als Tabellen, Lernkurve. */
+.dettab { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12.5px; }
+.dettab th, .dettab td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.dettab th { color: var(--muted); font-weight: 500; white-space: nowrap; }
+.dettab td input, .dettab td select { width: auto; min-width: 90px; }
+.detlaeufe td { white-space: nowrap; }
+.detdetails td { white-space: normal; }
+.detdetails img { max-width: 48%; margin: 6px 6px 0 0; border-radius: 6px; }
+.detkurve { width: 100%; max-width: 480px; display: block; margin: 8px 0; }
+.detkurve text { font-size: 10px; fill: var(--muted); }
+.detkurve .achse { stroke: var(--line); stroke-width: 1; }
+.detkurve polyline { fill: none; stroke-width: 2; }
+.detkurve polyline.k50 { stroke: #4ea1ff; }
+.detkurve polyline.k5095 { stroke: #ffb347; }
+.detkurve text.k50 { fill: #4ea1ff; }
+.detkurve text.k5095 { fill: #ffb347; }

@@ -453,29 +453,31 @@
     </fieldset>
 
     <fieldset id="trainingTabBox" style="display:none">
-      <legend>YOLO-Training</legend>
-      <p class="hint" id="yoloKopf"></p>
-      <table class="yolotab">
-        <tr><th><label for="yoloModell">Modell</label></th>
-          <td><select id="yoloModell"></select></td>
+      <legend>Detektor-Training (D-FINE)</legend>
+      <p class="hint" id="detKopf"></p>
+      <table class="dettab">
+        <tr><th><label for="detModell">Modell</label></th>
+          <td><select id="detModell"></select></td>
           <td class="hint">Nano reicht zum Anfangen. Größer lohnt erst ab
-            einigen hundert Bildern.</td></tr>
-        <tr><th><label for="yoloEpochen">Epochen</label></th>
-          <td><input type="number" id="yoloEpochen" value="50" min="1" max="1000"></td>
-          <td class="hint">Wie oft YOLO den ganzen Datensatz sieht. 50–100
-            ist üblich; bei wenigen Bildern lernt es sonst auswendig.</td></tr>
-        <tr><th><label for="yoloGroesse">Bildgröße</label></th>
-          <td><select id="yoloGroesse">
+            einigen hundert Bildern. D-FINE steht wie seine trainierten
+            Gewichte unter Apache 2.0 — frei, auch kommerziell.</td></tr>
+        <tr><th><label for="detEpochen">Epochen</label></th>
+          <td><input type="number" id="detEpochen" value="80" min="1" max="1000"></td>
+          <td class="hint">Wie oft das Modell den ganzen Datensatz sieht.
+            50–100 ist üblich. Zu wenige, und es erkennt noch, was es vorher
+            kannte — Kennzeichen, Rücklichter — statt der neuen Klasse.</td></tr>
+        <tr><th><label for="detGroesse">Bildgröße</label></th>
+          <td><select id="detGroesse">
             <option value="640">640 px</option>
             <option value="960">960 px</option>
             <option value="1280">1280 px</option>
           </select></td>
           <td class="hint">Die Kupplung ist klein im Bild — 960 erkennt sie
             besser als 640, braucht aber mehr Speicher und Zeit.</td></tr>
-        <tr><th><label for="yoloVal">Validierung</label></th>
-          <td><input type="number" id="yoloVal" value="20" min="5" max="50"> %</td>
+        <tr><th><label for="detVal">Validierung</label></th>
+          <td><input type="number" id="detVal" value="20" min="5" max="50"> %</td>
           <td class="hint">Dieser Anteil wird nicht trainiert, nur gemessen.
-            Ganze Aufträge bleiben zusammen, damit YOLO nicht den Nachbarn
+            Ganze Aufträge bleiben zusammen, damit das Modell nicht den Nachbarn
             aus derselben Serie wiedererkennt.</td></tr>
       </table>
       <p class="hint">Gestartet wird mit dem großen Knopf unten. Das Training
@@ -483,22 +485,22 @@
         Grafikkarte für sich.</p>
 
       <div class="head" style="margin-top:14px"><h2>Läufe</h2></div>
-      <div id="yoloLaeufe"></div>
+      <div id="detLaeufe"></div>
 
       <div class="head" style="margin-top:14px"><h2>Ausprobieren</h2></div>
       <div class="axis">
         <div>
-          <label for="yoloLauf">Lauf</label>
-          <select id="yoloLauf"></select>
+          <label for="detLauf">Lauf</label>
+          <select id="detLauf"></select>
         </div>
         <div>
-          <label for="yoloSchwelle">Mindestsicherheit</label>
-          <input type="number" id="yoloSchwelle" value="0.25" min="0.01" max="0.99" step="0.05">
+          <label for="detSchwelle">Mindestsicherheit</label>
+          <input type="number" id="detSchwelle" value="0.25" min="0.01" max="0.99" step="0.05">
         </div>
       </div>
-      <label for="yoloBild">Ein Foto wählen — am besten ein echtes</label>
-      <input type="file" id="yoloBild" accept="image/*">
-      <div id="yoloProbe"></div>
+      <label for="detBild">Ein Foto wählen — am besten ein echtes</label>
+      <input type="file" id="detBild" accept="image/*">
+      <div id="detProbe"></div>
     </fieldset>
 
     <fieldset id="datensatzBox" style="display:none">

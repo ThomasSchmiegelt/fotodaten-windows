@@ -38,7 +38,7 @@ import cover  # noqa: E402
 import baender  # noqa: E402
 import szenenbau  # noqa: E402
 import datensatz  # noqa: E402
-import yolo  # noqa: E402
+import detektor  # noqa: E402
 import sechsseiten  # noqa: E402
 from torwache import torwaechter  # noqa: E402
 
@@ -117,8 +117,8 @@ def _titel(art: str, params: dict) -> str:
         was = (params.get("name") or params.get("text") or "").strip()
         art = "Erstes Bild" if params.get("stufe") == "erstes" else "Sechs Seiten"
         return f"{art}: {was[:44]}" if was else art
-    if art == "yolo":
-        return f"YOLO trainieren: {params.get('modell') or 'yolo11n'}, {params.get('epochen') or 50} Epochen"
+    if art == "detektor":
+        return f"Detektor trainieren: {params.get('modell') or 'dfine-nano'}, {params.get('epochen') or 50} Epochen"
     if art == "demo":
         if params.get("bloecke"):
             return f"Ablauf, {len(params['bloecke'])} Bloecke"
@@ -291,7 +291,7 @@ def _abarbeiten(auftrag: dict, weitere: list[dict] | None = None) -> None:
                       "expose": run_expose, "ergaenzen": run_ergaenzen,
                       "aufbau": run_aufbau, "prosa": run_prosa,
                       "szenenbau": run_szenenbau,
-                      "sechsseiten": run_sechsseiten, "yolo": run_yolo}
+                      "sechsseiten": run_sechsseiten, "detektor": run_detektor}
             laeufe.get(auftrag["art"], run_job)(auftrag["params"])
         else:
             # Ein Ladevorgang fuer alle: die fertigen Prompts gehen als Liste
@@ -1294,21 +1294,21 @@ def _erstes_bild(params: dict, projekt: str) -> None:
                 else "abgebrochen")
 
 
-def run_yolo(params: dict) -> None:
-    """Ein YOLO-Training. Laeuft als Auftrag, weil es die Karte fuer sich braucht."""
+def run_detektor(params: dict) -> None:
+    """Ein Detektor-Training. Laeuft als Auftrag, weil es die Karte fuer sich braucht."""
     try:
         engine._cancel = False
         engine.aborted = False
-        erg = yolo.trainieren(
-            _projekt_des_laufs, str(params.get("modell") or "yolo11n"),
+        erg = detektor.trainieren(
+            _projekt_des_laufs, str(params.get("modell") or "dfine-nano"),
             max(1, min(1000, int(params.get("epochen") or 50))),
             int(params.get("bildgroesse") or 640),
             max(0.05, min(0.5, float(params.get("val_anteil") or 0.2))),
             melden, lambda: engine._cancel)
         melden("")
-        current["yolo"] = erg
-        engine.note("idle", "YOLO abgebrochen" if engine.aborted else
-                    f"YOLO fertig: {erg['lauf']} · {erg['train']} Bilder Training, "
+        current["detektor"] = erg
+        engine.note("idle", "Training abgebrochen" if engine.aborted else
+                    f"Training fertig: {erg['lauf']} · {erg['train']} Bilder Training, "
                     f"{erg['val']} Validierung")
     except Exception:
         err = traceback.format_exc()

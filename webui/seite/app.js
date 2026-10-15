@@ -24,7 +24,7 @@ const MODES = {
   katalog: {label: "Katalog", refs: 0, ph: "", hint: () => ""},
   seiten: {label: "Sechs Seiten erzeugen", refs: 0, ph: "", hint: () => ""},
   datensatz: {label: "Liste neu laden", refs: 0, ph: "", hint: () => ""},
-  training: {label: "YOLO trainieren", refs: 0, ph: "", hint: () => ""},
+  training: {label: "Detektor trainieren", refs: 0, ph: "", hint: () => ""},
   varianten: {label: "Varianten erzeugen", refs: 1, sweep: "varianten", count: 12,
               follow: true, lock: false,
               ph: "(optional) zusätzliche Angaben, die für jede Variante gelten",
@@ -289,7 +289,7 @@ function setMode(next) {
   if (istDatensatz) datensatzHolen();
   const istTraining = next === "training";
   $("trainingTabBox").style.display = istTraining ? "block" : "none";
-  if (istTraining) yoloHolen();
+  if (istTraining) detHolen();
   $("szenenBox").style.display = istSzenen ? "block" : "none";
   $("geschichteBox").style.display = istGeschichte ? "block" : "none";
   // Beide Reiter haben eine eigene Bedienung und brauchen die ueblichen
@@ -920,7 +920,7 @@ $("go").onclick = () => {
   if (mode === "demo") return starteDemo();
   if (mode === "seiten") return seitenStarten();
   if (mode === "datensatz") return datensatzHolen();
-  if (mode === "training") return yoloStarten();
+  if (mode === "training") return detStarten();
   start();
 };
 $("stop").onclick = () => {
@@ -3606,13 +3606,14 @@ async function dsSetzen(datei, status) {
   await datensatzHolen();
 }
 
-// ---------- YOLO-Training ----------
-// Einstellungen als Tabelle, die Laeufe als Tabelle mit ihren Kennzahlen,
-// und ein Feld zum Ausprobieren an einem echten Foto.
-let YOLO = {laeufe: [], projekt: "allgemein"};
+// ---------- Detektor-Training ----------
+// D-FINE (Apache 2.0) statt Ultralytics YOLO (AGPL-3.0). Einstellungen als
+// Tabelle, die Laeufe als Tabelle mit Kennzahlen und Lernkurve, und ein Feld
+// zum Ausprobieren an einem echten Foto.
+let DETEKTOR = {laeufe: [], projekt: "allgemein"};
 
-async function yoloRuf(daten) {
-  const res = await fetch("/api/yolo", {
+async function detRuf(daten) {
+  const res = await fetch("/api/detektor", {
     method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify(daten)
   }).then(r => r.json()).catch(() => null);
@@ -3623,81 +3624,98 @@ async function yoloRuf(daten) {
   return res;
 }
 
-const yoloZahl = v => (v == null ? "—" : Number(v).toFixed(3));
+const detZahl = v => (v == null ? "—" : Number(v).toFixed(3));
 
-async function yoloHolen() {
-  const g = await yoloRuf({tu: "liste"});
+// Lernkurve als kleine Grafik: mAP50 und mAP50-95 je Epoche, 0 bis 1.
+function detKurve(zeilen) {
+  if (!zeilen || zeilen.length < 2) return "";
+  const b = 420, h = 120, n = zeilen.length - 1;
+  const linie = feld => zeilen.map((z, i) =>
+    `${(i / n * b).toFixed(1)},${(h - z[feld] * h).toFixed(1)}`).join(" ");
+  return `<svg class="detkurve" viewBox="-30 -8 ${b + 40} ${h + 30}" role="img"
+      aria-label="Lernkurve">
+    <line x1="0" y1="${h}" x2="${b}" y2="${h}" class="achse"/>
+    <line x1="0" y1="0" x2="0" y2="${h}" class="achse"/>
+    <text x="-6" y="4" text-anchor="end">1</text><text x="-6" y="${h}" text-anchor="end">0</text>
+    <text x="${b}" y="${h + 16}" text-anchor="end">Epoche ${zeilen[n].epoche}</text>
+    <polyline points="${linie("map50")}" class="k50"/>
+    <polyline points="${linie("map50_95")}" class="k5095"/>
+    <text x="6" y="12" class="k50">mAP50</text><text x="62" y="12" class="k5095">mAP50-95</text>
+  </svg>`;
+}
+
+async function detHolen() {
+  const g = await detRuf({tu: "liste"});
   if (!g) return;
-  YOLO = g;
-  if (!$("yoloModell").options.length) {
-    $("yoloModell").innerHTML = g.modelle.map(m =>
+  DETEKTOR = g;
+  if (!$("detModell").options.length) {
+    $("detModell").innerHTML = g.modelle.map(m =>
       `<option value="${m.key}">${m.key} — ${esc(m.label)}</option>`).join("");
   }
-  $("yoloKopf").innerHTML = g.da
-    ? `Im Datensatz des Projekts liegen <b>${g.aufgenommen}</b> aufgenommene Bilder.`
-      + (g.aufgenommen < 50 ? " Für ein brauchbares Modell rechne mit einigen hundert." : "")
-    : `<span class="dsgrund">Die YOLO-Umgebung <code>yolo_umgebung/</code> fehlt.</span>`;
+  $("detKopf").innerHTML = `Im Datensatz des Projekts liegen <b>${g.aufgenommen}</b> aufgenommene Bilder.`
+    + (g.aufgenommen < 50 ? " Für ein brauchbares Modell rechne mit einigen hundert." : "");
   const fertig = g.laeufe.filter(l => l.gewichte);
-  $("yoloLauf").innerHTML = fertig.map(l => `<option>${l.name}</option>`).join("")
+  $("detLauf").innerHTML = fertig.map(l => `<option>${l.name}</option>`).join("")
     || `<option value="">— noch kein fertiger Lauf —</option>`;
-  $("yoloLaeufe").innerHTML = g.laeufe.length ? `<table class="yolotab yololaeufe">
-    <tr><th>Lauf</th><th>Epochen</th><th>Bildgröße</th><th>Präzision</th>
+  $("detLaeufe").innerHTML = g.laeufe.length ? `<table class="dettab detlaeufe">
+    <tr><th>Lauf</th><th>Epochen</th><th>Bilder</th><th>Präzision</th>
       <th>Trefferquote</th><th>mAP50</th><th>mAP50-95</th><th></th></tr>`
     + g.laeufe.map(l => {
       const b = l.beste || {}, e = l.einstellungen || {};
       const n = (l.zeilen || []).length;
-      return `<tr><td>${esc(l.name)}</td><td>${n}/${esc(e.epochs || "?")}</td>
-        <td>${esc(e.imgsz || "")}</td><td>${yoloZahl(b.praezision)}</td>
-        <td>${yoloZahl(b.trefferquote)}</td><td><b>${yoloZahl(b.map50)}</b></td>
-        <td>${yoloZahl(b.map50_95)}</td>
-        <td><a href="#" onclick="yoloDetails('${l.name}');return false">Kurven</a></td></tr>
-        <tr class="yolodetails" id="yd_${l.name}" style="display:none"><td colspan="8">
+      return `<tr><td>${esc(l.name)}</td><td>${n}/${esc(e.epochen ?? "?")}</td>
+        <td>${esc(e.train ?? "?")} / ${esc(e.val ?? "?")}</td><td>${detZahl(b.praezision)}</td>
+        <td>${detZahl(b.trefferquote)}</td><td><b>${detZahl(b.map50)}</b></td>
+        <td>${detZahl(b.map50_95)}</td>
+        <td><a href="#" onclick="detDetails('${l.name}');return false">Kurve</a></td></tr>
+        <tr class="detdetails" id="dd_${l.name}" style="display:none"><td colspan="8">
+          ${e.hinweis ? `<span class="dsgrund">${esc(e.hinweis)}</span><br>` : ""}
           ${l.gewichte ? `<code>${esc(l.gewichte)}</code><br>` : "<i>keine Gewichte — abgebrochen oder fehlgeschlagen</i><br>"}
-          ${["results.png", "val_batch0_pred.jpg", "confusion_matrix.png", "BoxPR_curve.png"]
-            .filter(x => (l.bilder || []).includes(x))
-            .map(x => `<a href="/yolo/${g.projekt}/${l.name}/${x}" target="_blank">`
-                    + `<img src="/yolo/${g.projekt}/${l.name}/${x}" alt="${x}" title="${x}"></a>`).join("")}
+          ${detKurve(l.zeilen)}
+          ${(l.bilder || []).map(x => `<a href="/detektor/${g.projekt}/${l.name}/${x}" target="_blank">`
+            + `<img src="/detektor/${g.projekt}/${l.name}/${x}" alt="${x}" title="grün: Wahrheit, rot: Vorhersage"></a>`).join("")}
         </td></tr>`;
     }).join("") + `</table>
     <p class="hint">mAP50 ist die übliche Hauptzahl: 1,0 hieße jede Kupplung
       gefunden und richtig umrandet. Präzision: wie oft eine gemeldete Box
-      stimmt. Trefferquote: wie viele Kupplungen gefunden werden.</p>`
+      stimmt. Trefferquote: wie viele Kupplungen gefunden werden — beide an
+      der Schwelle gemessen, bei der sie zusammen am besten sind.
+      Spalte „Bilder“: Training / Validierung.</p>`
     : `<p class="hint">Noch kein Training.</p>`;
 }
 
-function yoloDetails(name) {
-  const z = $("yd_" + name);
+function detDetails(name) {
+  const z = $("dd_" + name);
   z.style.display = z.style.display === "none" ? "" : "none";
 }
 
-async function yoloStarten() {
-  if (!YOLO.da) return say("Die YOLO-Umgebung fehlt.", "err");
+async function detStarten() {
   buttonState("busy");
-  const res = await yoloRuf({tu: "starten", modell: $("yoloModell").value,
-    epochen: parseInt($("yoloEpochen").value, 10) || 50,
-    bildgroesse: parseInt($("yoloGroesse").value, 10) || 640,
-    val_anteil: (parseInt($("yoloVal").value, 10) || 20) / 100});
+  const res = await detRuf({tu: "starten", modell: $("detModell").value,
+    epochen: parseInt($("detEpochen").value, 10) || 50,
+    bildgroesse: parseInt($("detGroesse").value, 10) || 640,
+    val_anteil: (parseInt($("detVal").value, 10) || 20) / 100});
   if (!res) return buttonState("idle");
-  say("YOLO-Training eingereiht …", "ok");
+  say("Training eingereiht …", "ok");
   poll();
 }
 
-$("yoloBild").onchange = () => {
-  const datei = $("yoloBild").files[0];
+$("detBild").onchange = () => {
+  const datei = $("detBild").files[0];
   if (!datei) return;
-  if (!$("yoloLauf").value) return say("Es gibt noch keinen fertigen Lauf.", "err");
+  if (!$("detLauf").value) return say("Es gibt noch keinen fertigen Lauf.", "err");
   const leser = new FileReader();
   leser.onload = async () => {
-    $("yoloProbe").innerHTML = `<p class="hint">erkennt …</p>`;
-    const res = await yoloRuf({tu: "ausprobieren", lauf: $("yoloLauf").value,
-      bild: leser.result, schwelle: parseFloat($("yoloSchwelle").value) || 0.25});
-    if (!res) return ($("yoloProbe").innerHTML = "");
+    $("detProbe").innerHTML = `<p class="hint">erkennt …</p>`;
+    const res = await detRuf({tu: "ausprobieren", lauf: $("detLauf").value,
+      bild: leser.result, schwelle: parseFloat($("detSchwelle").value) || 0.25});
+    if (!res) return ($("detProbe").innerHTML = "");
     const e = {breite: res.breite, hoehe: res.hoehe};
-    $("yoloProbe").innerHTML = `<figure class="dsbild" style="max-width:640px">
+    $("detProbe").innerHTML = `<figure class="dsbild" style="max-width:640px">
       <div class="dsflaeche"><img src="${leser.result}" alt="">
         ${res.boxen.map(b => dsRahmen(b.box, e, "dsbox")).join("")}</div>
       <figcaption>${res.boxen.length
-        ? res.boxen.map(b => `${esc(b.klasse)} ${yoloZahl(b.wert)}`).join(" · ")
+        ? res.boxen.map(b => `${esc(b.klasse)} ${detZahl(b.wert)}`).join(" · ")
         : "nichts gefunden"}</figcaption></figure>`;
   };
   leser.readAsDataURL(datei);
@@ -3899,7 +3917,7 @@ function poll() {
     // Der Katalog liegt ausserhalb von outputs/ -- loadGallery() sieht ihn
     // nicht, er muss eigens nachgeladen werden.
     if (mode === "seiten") seitenHolen();
-    if (mode === "training") yoloHolen();
+    if (mode === "training") detHolen();
     loadGallery();
   }, 900);
 }
