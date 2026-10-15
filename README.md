@@ -1,9 +1,14 @@
 # Qwen-Image 2.1 — lokale Weboberfläche und GIMP-Anbindung
 
 Text zu Bild, Bildbearbeitung, Gruppenbilder und Serien mit
-[Qwen-Image 2.1](https://huggingface.co/Qwen/Qwen-Image-2.1) — vollständig auf
-dem eigenen Rechner, ohne Cloud. Dazu eine Freitexteingabe auf Deutsch und ein
-GIMP-Plugin.
+[Qwen-Image 2.1](https://huggingface.co/Qwen/Qwen-Image-2.1) — auf dem eigenen
+Rechner; Sprach- und Bildmodell lassen sich wahlweise auf eine
+OpenAI-kompatible Cloud-Schnittstelle umstellen. Dazu eine Freitexteingabe auf
+Deutsch, ein GIMP-Plugin und eine Kette für **Trainingsdaten**: Varianten
+erzeugen, Bounding Boxes automatisch setzen und prüfen, YOLO trainieren.
+
+**Wie man damit arbeitet, steht in der [Bedienungsanleitung](ANLEITUNG.md).**
+Diese README erklärt, wie es gebaut ist und warum.
 
 Entwickelt und gemessen auf einer **RTX 3090 (24 GB) mit 31 GB Arbeitsspeicher**.
 
@@ -60,6 +65,20 @@ python3 -m venv qwen_bild
 Qwen-Image 2.1 braucht `diffusers` von `main`; die Version in `requirements.txt`
 ist auf den geprüften Stand festgenagelt. Beim ersten Start lädt das Modell
 rund 31 GB in den Hugging-Face-Cache.
+
+**Für das YOLO-Training** eine zweite, schlanke Umgebung. Sie bringt nur
+Ultralytics mit und nutzt das PyTorch aus `qwen_bild` über eine `.pth`-Datei
+mit — das spart rund 5 GB, und `qwen_bild` bleibt unberührt:
+
+```bash
+python3 -m venv yolo_umgebung
+./qwen_bild/bin/python -c "import site; print(site.getsitepackages()[0])" \
+  > "$(./yolo_umgebung/bin/python -c 'import site; print(site.getsitepackages()[0])')/qwen_bild_torch.pth"
+./yolo_umgebung/bin/pip install ultralytics
+```
+
+Die Box-Modelle für die Trainingsdaten (Qwen3-VL-2B, Grounding DINO, zusammen
+rund 5 GB) lädt das Programm beim ersten Gebrauch selbst.
 
 ## Starten
 
@@ -535,6 +554,12 @@ nicht gelesen.
 | `QWEN_CHAT_MODEL` | `qwen3.5:4b` | Sprachmodell für die Deutung |
 | `QWEN_URL` | `http://127.0.0.1:7860` | Server, den das GIMP-Plugin anspricht |
 | `QWEN_GIMP` | `gimp` | Befehl für „In GIMP öffnen" |
+| `QWEN_BOX_MODELL` | `Qwen/Qwen3-VL-2B-Instruct` | setzt die Bounding Box |
+| `QWEN_BOX_PRUEFER` | `IDEA-Research/grounding-dino-base` | prüft die Box gegen |
+
+Cloud-Zugänge stehen nicht in Umgebungsvariablen, sondern in
+`einstellungen.json` (Rechte 600, in `.gitignore`) — eingetragen über
+**Cloud-Modelle** in der Kopfzeile.
 
 ## Bekannte Grenzen
 
@@ -609,6 +634,7 @@ scheiterte erst viel später im Server mit `KeyError: ''`.
 
 ```
 start.sh              Server starten, Browser öffnen
+ANLEITUNG.md          Bedienungsanleitung
 webui/server.py       HTTP-Server, nur Routen und Start
 webui/auftraege.py    Warteschlange und Abwicklung eines Auftrags
 webui/projekte.py     getrennte Ablagen, Projektverzeichnisse
@@ -625,6 +651,9 @@ webui/sprache/        Ollama: deuten.py (Freitext), uebersetzen.py,
 webui/szenenbau.py    eine Szene in Stufen: Kulisse, Posen, Zusammensetzen
 webui/sechsseiten.py  sechs Ansichten eines Gegenstands und ihr Katalog
 webui/cover.py        die Eingabemaske fuer ein Titelblatt
+webui/cloud.py        Sprach- und Bildmodell ueber eine OpenAI-kompatible API
+webui/datensatz.py    Bounding Boxes (Qwen3-VL + Grounding DINO), YOLO/COCO
+webui/yolo.py         YOLO-Training in yolo_umgebung/, Laeufe, Ausprobieren
 webui/ablauf.py       Abläufe als Blöcke, mitgelieferte Folgen
 webui/demo.py         Startbild-Vorgabe und Videobau
 webui/pruefung.py     Oberfläche gegen den Server prüfen
