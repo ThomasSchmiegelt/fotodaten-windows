@@ -2,7 +2,7 @@
 // in stil.css. Geladen wird die Datei am Ende des Rumpfes -- die Elemente
 // sind dann alle vorhanden.
 const $ = id => document.getElementById(id);
-const RATIOS = {"1:1":1, "4:3":4/3, "3:4":3/4, "3:2":3/2, "2:3":2/3, "16:9":16/9, "9:16":9/16};
+const RATIOS = {"1:1":1, "4:3":4/3, "3:4":3/4, "3:2":3/2, "2:3":2/3, "16:9":16/9, "9:16":9/16, "A4":210/297};
 const esc = t => String(t).replace(/[<>&"]/g, c => ({"<":"&lt;", ">":"&gt;", "&":"&amp;", '"':"&quot;"}[c]));
 
 const MODES = {
@@ -23,6 +23,8 @@ const MODES = {
   geschichte: {label: "Geschichte erzeugen", refs: 0, ph: "", hint: () => ""},
   katalog: {label: "Katalog", refs: 0, ph: "", hint: () => ""},
   seiten: {label: "Sechs Seiten erzeugen", refs: 0, ph: "", hint: () => ""},
+  datensatz: {label: "Liste neu laden", refs: 0, ph: "", hint: () => ""},
+  training: {label: "YOLO trainieren", refs: 0, ph: "", hint: () => ""},
   varianten: {label: "Varianten erzeugen", refs: 1, sweep: "varianten", count: 12,
               follow: true, lock: false,
               ph: "(optional) zusätzliche Angaben, die für jede Variante gelten",
@@ -282,12 +284,18 @@ function setMode(next) {
   const istSeiten = next === "seiten";
   $("seitenBox").style.display = istSeiten ? "block" : "none";
   if (istSeiten) { seitenGegenstandFuellen(); seitenHolen(); }
+  const istDatensatz = next === "datensatz";
+  $("datensatzBox").style.display = istDatensatz ? "block" : "none";
+  if (istDatensatz) datensatzHolen();
+  const istTraining = next === "training";
+  $("trainingTabBox").style.display = istTraining ? "block" : "none";
+  if (istTraining) yoloHolen();
   $("szenenBox").style.display = istSzenen ? "block" : "none";
   $("geschichteBox").style.display = istGeschichte ? "block" : "none";
   // Beide Reiter haben eine eigene Bedienung und brauchen die ueblichen
   // Kaesten nicht -- Prompt, Darstellung, Bildgroesse.
   const eigen = istDemo || istBausteine || istSzenen || istGeschichte
-                || istKatalog || istSeiten;
+                || istKatalog || istSeiten || istDatensatz || istTraining;
   eigenerReiter = eigen;
   $("demoBox").style.display = istDemo ? "block" : "none";
   $("bausteinBox").style.display = istBausteine ? "block" : "none";
@@ -295,14 +303,15 @@ function setMode(next) {
   // Ableiten wirkungslos. Der Reiter hat dafuer seine eigene Zeile.
   document.querySelectorAll(".ableiten").forEach(
     el => { el.style.display = eigen ? "none" : "block"; });
-  ["boxVorlage", "boxDarstellung", "boxBild", "boxFein", "uploadBox"].forEach(
+  ["boxVorlage", "boxDarstellung", "boxBild", "boxFein", "uploadBox", "boxTraining"].forEach(
     id => { if (eigen) $(id).style.display = "none"; });
   $("prompt").parentElement.querySelectorAll("#prompt, #transNote, #tplHint")
     .forEach(el => { el.style.display = eigen ? "none" : ""; });
   document.querySelectorAll("label[for=prompt]").forEach(
     el => el.style.display = eigen ? "none" : "");
   if (!eigen) { $("boxVorlage").style.display = ""; $("boxDarstellung").style.display = "";
-                $("boxBild").style.display = ""; $("boxFein").style.display = ""; }
+                $("boxBild").style.display = ""; $("boxFein").style.display = "";
+                $("boxTraining").style.display = ""; }
   demoDauer();
   const istVarianten = next === "varianten";
   $("gruppeBox").style.display = next === "gruppe" ? "block" : "none";
@@ -338,6 +347,8 @@ function applyOverrides(o) {
   });
   if (o.transparent !== undefined) $("transparent").checked = !!o.transparent;
   if (o.lock_seed !== undefined) $("lockSeed").checked = !!o.lock_seed;
+  // Das Titelblatt hat sein eigenes Format und folgt nicht der Vorlage.
+  if (o.follow_reference !== undefined) $("follow").checked = !!o.follow_reference;
   if (o.count !== undefined) $("count").value = o.count;
   // Hochskalieren bringt eine groessere Kantenlaenge mit -- der Regler muss
   // sie zeigen, sonst waere nicht zu sehen, warum es laenger dauert.
@@ -861,6 +872,8 @@ async function start() {
     view: $("view").value, effect: $("effect").value, form: $("form").value,
     keep: $("keep").value, scenario: $("scenario").value,
     cover: coverFelder(),
+    training: {an: $("trainingAn").checked, klasse: $("trainingKlasse").value.trim(),
+               suche: $("trainingSuche").value.trim()},
     action: plan ? $("ausBildernAktion").value : $("action").value,
     group_size: parseInt($("groupSize").value, 10) || 2,
     paint: $("paint").value, palette: $("palette").value,
@@ -906,6 +919,8 @@ async function start() {
 $("go").onclick = () => {
   if (mode === "demo") return starteDemo();
   if (mode === "seiten") return seitenStarten();
+  if (mode === "datensatz") return datensatzHolen();
+  if (mode === "training") return yoloStarten();
   start();
 };
 $("stop").onclick = () => {
@@ -3187,6 +3202,17 @@ $("katSuche").addEventListener("input", katalogZeigen);
 // seine eigene Liste und seine eigenen Verweise, /katalog/... statt
 // /outputs/...
 let SEITENNAMEN = [], SEITENKATALOG = [];
+// Der Eintrag, an dem gerade gearbeitet wird: angelegt vom ersten Bild,
+// gefuellt von den sechs Seiten, Vorlage fuer die Effekte.
+let SEITENAKTIV = null;
+// Der zuletzt gerechnete Eintrag steht noch im Status. Wer "neu anfangen"
+// geklickt hat, soll ihn nicht beim naechsten Abfragen zurueckbekommen.
+let SEITENVERWORFEN = "";
+
+// Die Effekte, die auf dem ersten Bild aufsetzen. Alle brauchen ein Bild --
+// aus frischem Text waere es ein anderer Gegenstand.
+const SEITENEFFEKTE = ["magazine", "explosion", "cad", "blueprint",
+                       "lifestyle", "orbit"];
 
 async function seitenRuf(daten) {
   const res = await fetch("/api/sechsseiten", {
@@ -3224,7 +3250,9 @@ $("seitenGegenstand").addEventListener("change", seitenQuelle);
 // Die sechs Plaetze. Was noch fehlt, bleibt als leeres Feld stehen -- so ist
 // zu sehen, wie viele Ansichten noch kommen.
 function seitenMosaik(projekt, id, bilder, sichten) {
-  return `<div class="mosaic">` + SEITENNAMEN.map(s => {
+  const plaetze = (bilder || {}).erstes
+    ? [{key: "erstes", label: "Erstes Bild"}, ...SEITENNAMEN] : SEITENNAMEN;
+  return `<div class="mosaic">` + plaetze.map(s => {
     const datei = (bilder || {})[s.key];
     const url = `/katalog/${projekt}/${id}/${datei}`;
     // Was das Sprachmodell ueber diese Ansicht gesagt hat, haengt am Bild:
@@ -3243,6 +3271,11 @@ function seitenMosaik(projekt, id, bilder, sichten) {
 // Der Eintrag, waehrend er entsteht.
 function zeigeSeiten(st) {
   if (!st || !st.id) { $("seitenJetzt").innerHTML = ""; return; }
+  // Was gerade entsteht, ist der Eintrag, an dem weitergearbeitet wird.
+  if (st.id !== SEITENVERWORFEN && (!SEITENAKTIV || SEITENAKTIV.id !== st.id)) {
+    SEITENAKTIV = {projekt: st.projekt, id: st.id};
+    seitenStufen();
+  }
   // So hat das Sprachmodell den Gegenstand von jeder Seite gelesen. Das ist
   // die Stelle, an der eine danebengegangene Ansicht erklaerbar wird.
   const sichten = st.sichten || {};
@@ -3261,6 +3294,52 @@ async function seitenHolen() {
   if (!SEITENNAMEN.length) SEITENNAMEN = g.seiten || [];
   SEITENKATALOG = g.katalog || [];
   zeigeSeitenKatalog();
+  seitenStufen();
+}
+
+function seitenEintrag() {
+  return SEITENAKTIV && SEITENKATALOG.find(
+    e => e.id === SEITENAKTIV.id && e.projekt === SEITENAKTIV.projekt) || null;
+}
+
+// Welche Stufe dran ist. Ohne erstes Bild sind zwei bis vier gedimmt; der
+// grosse Knopf macht die jeweils naechste Rechnung.
+function seitenStufen() {
+  const e = seitenEintrag();
+  const erstes = !!(e && (e.bilder || {}).erstes);
+  ["seitenVorschlag", "seitenGo", "seitenEffekte"].forEach(
+    id => $(id).closest("p").classList.toggle("spaeter", !erstes));
+  $("seitenEffekte").innerHTML = SEITENEFFEKTE
+    .map(k => EFFECTS.find(x => x.key === k)).filter(x => x)
+    .map(x => `<a href="#" onclick="seitenEffekt('${x.key}');return false">${esc(x.label)}</a>`)
+    .join(" · ");
+  $("seitenAktiv").innerHTML = e
+    ? `<p class="hint">In Arbeit: <b>${esc(e.name)}</b> · ${esc(e.angelegt || "")}
+         · <a href="#" onclick="seitenNeu();return false">neuen Gegenstand anfangen</a><br>
+         <code>${esc(e.prompt || "")}</code></p>`
+    : "";
+  MODES.seiten.label = erstes ? "Sechs Seiten erzeugen" : "Erstes Bild erzeugen";
+  if (mode === "seiten" && !$("go").classList.contains("busy"))
+    $("go").textContent = MODES.seiten.label;
+}
+
+function seitenWeiter(projekt, id) {
+  SEITENAKTIV = {projekt: projekt, id: id};
+  SEITENVERWORFEN = "";
+  const e = seitenEintrag();
+  if (e) $("seitenName").value = e.name || "";
+  seitenStufen();
+  $("seitenBox").scrollIntoView({behavior: "smooth"});
+  say("Weiter mit diesem Gegenstand.", "ok");
+}
+
+function seitenNeu() {
+  SEITENVERWORFEN = (SEITENAKTIV || {}).id || "";
+  SEITENAKTIV = null;
+  $("seitenText").value = "";
+  $("seitenName").value = "";
+  $("seitenJetzt").innerHTML = "";
+  seitenStufen();
 }
 
 function zeigeSeitenKatalog() {
@@ -3278,9 +3357,8 @@ function zeigeSeitenKatalog() {
           <code>${esc(e.prompt || "")}</code><br>
           <a href="#" onclick="seitenPrompt('${e.id}');return false">Prompt
             übernehmen</a> ·
-          <a href="#" onclick="seitenVorlage('${e.projekt}','${e.id}');return false">Vorderansicht
-            als Vorlage</a> — für <code>/magazine cover</code>,
-          <code>/ptexplosion</code>, <code>/cad</code>, <code>/blueprint</code></p>
+          <a href="#" onclick="seitenWeiter('${e.projekt}','${e.id}');return false">hiermit
+            weitermachen</a> — Seiten nachholen, Effekte</p>
         ${seitenMosaik(e.projekt, e.id, e.bilder, e.sichten)}
       </div>`;
     }).join("")
@@ -3306,48 +3384,96 @@ function seitenPrompt(id) {
   say("Prompt übernommen — jetzt lässt sich daraus Neues bauen.", "ok");
 }
 
-// Die Vorderansicht als Referenzbild in Bearbeiten. Das ist der Weg zu
-// Cover, Explosionszeichnung, CAD und Bauplan: alle vier setzen auf einem
-// Bild auf, nicht auf frischem Text -- sonst waere es ein anderer
-// Gegenstand.
-async function seitenVorlage(projekt, id) {
-  const e = SEITENKATALOG.find(x => x.id === id);
-  const datei = ((e || {}).bilder || {}).vorne;
-  if (!datei) return say("Dieser Eintrag hat noch keine Vorderansicht.", "err");
-  if (refs.length >= maxRefs) return say(`Schon ${maxRefs} Vorlagen geladen.`, "err");
-  const antwort = await fetch(`/katalog/${projekt}/${id}/${datei}`)
-    .then(r => r.blob()).catch(() => null);
-  if (!antwort) return say("Das Bild ließ sich nicht laden.", "err");
+// Stufe vier: das erste Bild als Vorlage in Bearbeiten, sein Prompt ins
+// Feld, der Effekt gewaehlt. Cover, Explosionszeichnung, CAD und Bauplan
+// setzen alle auf einem Bild auf -- aus frischem Text waere es ein anderer
+// Gegenstand. Der Prompt sagt dem Effekt, was er vor sich hat.
+async function seitenEffekt(effekt) {
+  const e = seitenEintrag();
+  if (!e) return say("Zuerst das erste Bild erzeugen.", "err");
+  // Explosionszeichnung und CAD entstehen aus dem Prompt allein: aus dem
+  // Foto heraus zerlegt das Modell nichts und bleibt beim Foto.
+  if ((EFFECTS.find(x => x.key === effekt) || {}).aus_text) {
+    refs = [];
+    refPrompts = [];
+    setMode("t2i");
+    $("prompt").value = e.prompt || "";
+    $("effect").value = effekt;
+    $("effect").onchange();
+    drawThumbs();
+    return say("Prompt und Effekt stehen in Text → Bild — jetzt erzeugen.", "ok");
+  }
+  const bilder = e.bilder || {};
+  const datei = bilder.erstes || bilder.vorne;
+  if (!datei) return say("Dieser Eintrag hat noch kein Bild.", "err");
+  const blob = await fetch(`/katalog/${e.projekt}/${e.id}/${datei}`)
+    .then(r => r.ok ? r.blob() : null).catch(() => null);
+  if (!blob) return say("Das Bild ließ sich nicht laden.", "err");
   const leser = new FileReader();
   leser.onload = () => {
-    refs.push(leser.result);
-    refPrompts.push("");
+    // Nur dieses eine Bild: eine Vorlage von vorhin daneben waere ein
+    // zweiter Gegenstand auf dem Cover.
+    refs = [leser.result];
+    refPrompts = [""];
     setMode("edit");
+    $("prompt").value = e.prompt || "";
+    $("effect").value = effekt;
+    $("effect").onchange();
     drawThumbs();
-    say("Vorderansicht als Vorlage geladen — jetzt einen Effekt wählen.", "ok");
+    say("Erstes Bild, Prompt und Effekt stehen in Bearbeiten — "
+        + "nachstellen, dann erzeugen.", "ok");
   };
-  leser.readAsDataURL(antwort);
+  leser.readAsDataURL(blob);
 }
 
-async function seitenStarten() {
-  const text = $("seitenText").value.trim();
-  const gegenstand = $("seitenGegenstand").value;
-  if (!text && !gegenstand) {
-    return say("Bitte den Gegenstand beschreiben oder einen Baustein wählen.", "err");
-  }
+function seitenSeed() {
   let seed = parseInt($("seed").value, 10);
   if (isNaN(seed) || seed < 0) {
     seed = Math.floor(Math.random() * 2 ** 31);
     $("seed").value = seed;
   }
+  return seed;
+}
+
+// Stufe eins: ein Bild, ein neuer Eintrag.
+async function seitenErstes() {
+  const text = $("seitenText").value.trim();
+  const gegenstand = $("seitenGegenstand").value;
+  if (!text && !gegenstand) {
+    return say("Bitte den Gegenstand beschreiben oder einen Baustein wählen.", "err");
+  }
   buttonState("busy");
   const res = await seitenRuf({
+    stufe: "erstes", text: text, gegenstand: gegenstand,
+    name: $("seitenName").value.trim(), stil: $("seitenStil").value,
+    ausformulieren: $("seitenAusformulieren").checked,
+    base: parseInt($("base").value, 10),
+    steps: parseInt($("steps").value, 10),
+    seed: seitenSeed(), modell: $("gsModell").value});
+  if (!res) return buttonState("idle");
+  SEITENAKTIV = null;
+  seitenStufen();
+  say("Das erste Bild wird gerechnet …", "ok");
+  poll();
+}
+$("seitenErstes").onclick = e => { e.preventDefault(); seitenErstes(); };
+
+// Stufe drei -- und was der grosse Knopf tut: ohne erstes Bild das erste
+// Bild, danach die sechs Seiten in denselben Eintrag.
+async function seitenStarten() {
+  const e = seitenEintrag();
+  if (!e || !(e.bilder || {}).erstes) return seitenErstes();
+  const text = $("seitenText").value.trim();
+  const gegenstand = $("seitenGegenstand").value;
+  buttonState("busy");
+  const res = await seitenRuf({
+    eintrag: e.id, eintrag_projekt: e.projekt,
     text: text, gegenstand: gegenstand,
     name: $("seitenName").value.trim(), stil: $("seitenStil").value,
     ausformulieren: $("seitenAusformulieren").checked,
     base: parseInt($("base").value, 10),
     steps: parseInt($("steps").value, 10),
-    seed: seed, modell: $("gsModell").value});
+    seed: seitenSeed(), modell: $("gsModell").value});
   if (!res) return buttonState("idle");
   say("Die sechs Seiten werden gerechnet …", "ok");
   poll();
@@ -3359,17 +3485,291 @@ $("seitenGo").onclick = e => { e.preventDefault(); seitenStarten(); };
 // das sonst beim Erzeugen im Verborgenen liefe, nur sichtbar und aenderbar.
 async function seitenVorschlagen() {
   const text = $("seitenText").value.trim();
-  if (!text) return say("Bitte zuerst beschreiben, was zu sehen sein soll.", "err");
+  const e = seitenEintrag();
+  if (!e || !(e.bilder || {}).erstes) {
+    return say("Zuerst das erste Bild erzeugen — die Prompts beschreiben "
+               + "genau den Gegenstand darin.", "err");
+  }
   $("seitenVorschlag").textContent = "schreibt …";
   const res = await seitenRuf({tu: "vorschlag", text: text,
+                               eintrag: e.id, eintrag_projekt: e.projekt,
                                modell: $("gsModell").value});
-  $("seitenVorschlag").innerHTML = "<b>Vorschlag schreiben lassen</b>";
+  $("seitenVorschlag").innerHTML = "<b>Prompts schreiben lassen</b>";
   if (!res) return;
   $("seitenText").value = res.text;
   seitenQuelle();
-  say("Vorschlag steht — durchlesen, ändern, dann erzeugen.", "ok");
+  say("Die Prompts stehen im Feld — durchlesen, ändern, dann die sechs "
+      + "Seiten erzeugen.", "ok");
 }
 $("seitenVorschlag").onclick = e => { e.preventDefault(); seitenVorschlagen(); };
+
+// ---------- Datensatz ----------
+// Die Pruefliste der Trainingsdaten. Jede Box liegt in Bildpixeln vor; die
+// Anzeige rechnet in Prozent um, damit sie bei jeder Breite passt.
+let DATENSATZ = [], DSNEU = {}, DSPROJEKT = "allgemein";
+
+async function dsRuf(daten) {
+  const res = await fetch("/api/datensatz", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(daten)
+  }).then(r => r.json()).catch(() => null);
+  if (!res || res.error) {
+    say(res ? res.error : "Der Server ist nicht erreichbar.", "err");
+    return null;
+  }
+  return res;
+}
+
+async function datensatzHolen() {
+  const g = await dsRuf({tu: "liste"});
+  if (!g) return;
+  DATENSATZ = g.eintraege || [];
+  DSPROJEKT = g.projekt || "allgemein";
+  const z = g.zahlen || {};
+  $("dsKopf").innerHTML = `<b>${z.ok || 0}</b> aufgenommen · <b>${z.pruefen || 0}</b> zu prüfen · `
+    + `${z.verworfen || 0} verworfen · Klassen: ${esc((g.klassen || []).join(", ") || "—")}<br>`
+    + `<code>${esc(g.pfad || "")}</code>`;
+  datensatzZeigen();
+}
+
+function dsRahmen(box, e, klasse) {
+  if (!box) return "";
+  const [x1, y1, x2, y2] = box;
+  return `<div class="${klasse}" style="left:${100 * x1 / e.breite}%;top:${100 * y1 / e.hoehe}%;`
+    + `width:${100 * (x2 - x1) / e.breite}%;height:${100 * (y2 - y1) / e.hoehe}%"></div>`;
+}
+
+function datensatzZeigen() {
+  const status = $("dsFilter").value;
+  const liste = DATENSATZ.filter(e => e.status === status);
+  $("dsListe").innerHTML = liste.length ? `<div class="dsgitter">` + liste.map(e => {
+    const neu = DSNEU[e.datei];
+    const gruende = (e.gruende || []).join(" · ");
+    const achsen = Object.entries(e.achsen || {}).map(([k, v]) => `${k}: ${v}`).join(" · ");
+    return `<figure class="dsbild" data-datei="${esc(e.datei)}">
+      <div class="dsflaeche" onmousedown="dsZiehen(event, '${esc(e.datei)}')">
+        <img src="/datensatz/${DSPROJEKT}/${e.status}/${esc(e.datei)}" draggable="false" alt="">
+        ${dsRahmen(e.dino, e, "dsdino")}
+        ${dsRahmen(neu || e.box, e, neu ? "dsbox dsneu" : "dsbox")}
+      </div>
+      <figcaption>
+        ${gruende ? `<span class="dsgrund">${esc(gruende)}</span><br>` : ""}
+        IoU VL/DINO ${e.ueberein ?? "—"}${e.basis_iou != null ? ` · Basis ${e.basis_iou}` : ""}
+        ${e.von_hand ? " · von Hand" : ""}<br>
+        <span title="${esc(e.prompt || "")}">${esc(achsen || e.datei)}</span><br>
+        ${e.status !== "ok" ? `<a href="#" onclick="dsSetzen('${esc(e.datei)}','ok');return false">✓ aufnehmen</a>` : ""}
+        ${e.status !== "pruefen" ? `<a href="#" onclick="dsSetzen('${esc(e.datei)}','pruefen');return false">zurück auf prüfen</a>` : ""}
+        ${e.status !== "verworfen" ? `<a href="#" onclick="dsSetzen('${esc(e.datei)}','verworfen');return false">✗ verwerfen</a>` : ""}
+        ${neu ? `<a href="#" onclick="delete DSNEU['${esc(e.datei)}'];datensatzZeigen();return false">neue Box verwerfen</a>` : ""}
+      </figcaption>
+    </figure>`;
+  }).join("") + `</div>` : `<p class="hint">Hier liegt nichts.</p>`;
+}
+$("dsFilter").onchange = datensatzZeigen;
+
+// Eine neue Box ziehen. Gerechnet wird in Bildpixeln des Originals.
+function dsZiehen(ev, datei) {
+  ev.preventDefault();
+  const e = DATENSATZ.find(x => x.datei === datei);
+  const flaeche = ev.currentTarget;
+  const r = flaeche.getBoundingClientRect();
+  const punkt = m => [Math.max(0, Math.min(1, (m.clientX - r.left) / r.width)) * e.breite,
+                      Math.max(0, Math.min(1, (m.clientY - r.top) / r.height)) * e.hoehe];
+  const start = punkt(ev);
+  const zeiger = document.createElement("div");
+  zeiger.className = "dsbox dsneu";
+  flaeche.appendChild(zeiger);
+  const zeichnen = m => {
+    const p = punkt(m);
+    const box = [Math.min(start[0], p[0]), Math.min(start[1], p[1]),
+                 Math.max(start[0], p[0]), Math.max(start[1], p[1])];
+    Object.assign(zeiger.style, {left: 100 * box[0] / e.breite + "%", top: 100 * box[1] / e.hoehe + "%",
+      width: 100 * (box[2] - box[0]) / e.breite + "%", height: 100 * (box[3] - box[1]) / e.hoehe + "%"});
+    return box;
+  };
+  const weiter = m => zeichnen(m);
+  const ende = m => {
+    document.removeEventListener("mousemove", weiter);
+    document.removeEventListener("mouseup", ende);
+    const box = zeichnen(m);
+    if (box[2] - box[0] > 4 && box[3] - box[1] > 4) DSNEU[datei] = box.map(Math.round);
+    datensatzZeigen();
+  };
+  document.addEventListener("mousemove", weiter);
+  document.addEventListener("mouseup", ende);
+}
+
+async function dsSetzen(datei, status) {
+  const res = await dsRuf({tu: "setzen", datei, status, box: DSNEU[datei] || null});
+  if (!res) return;
+  delete DSNEU[datei];
+  await datensatzHolen();
+}
+
+// ---------- YOLO-Training ----------
+// Einstellungen als Tabelle, die Laeufe als Tabelle mit ihren Kennzahlen,
+// und ein Feld zum Ausprobieren an einem echten Foto.
+let YOLO = {laeufe: [], projekt: "allgemein"};
+
+async function yoloRuf(daten) {
+  const res = await fetch("/api/yolo", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(daten)
+  }).then(r => r.json()).catch(() => null);
+  if (!res || res.error) {
+    say(res ? res.error : "Der Server ist nicht erreichbar.", "err");
+    return null;
+  }
+  return res;
+}
+
+const yoloZahl = v => (v == null ? "—" : Number(v).toFixed(3));
+
+async function yoloHolen() {
+  const g = await yoloRuf({tu: "liste"});
+  if (!g) return;
+  YOLO = g;
+  if (!$("yoloModell").options.length) {
+    $("yoloModell").innerHTML = g.modelle.map(m =>
+      `<option value="${m.key}">${m.key} — ${esc(m.label)}</option>`).join("");
+  }
+  $("yoloKopf").innerHTML = g.da
+    ? `Im Datensatz des Projekts liegen <b>${g.aufgenommen}</b> aufgenommene Bilder.`
+      + (g.aufgenommen < 50 ? " Für ein brauchbares Modell rechne mit einigen hundert." : "")
+    : `<span class="dsgrund">Die YOLO-Umgebung <code>yolo_umgebung/</code> fehlt.</span>`;
+  const fertig = g.laeufe.filter(l => l.gewichte);
+  $("yoloLauf").innerHTML = fertig.map(l => `<option>${l.name}</option>`).join("")
+    || `<option value="">— noch kein fertiger Lauf —</option>`;
+  $("yoloLaeufe").innerHTML = g.laeufe.length ? `<table class="yolotab yololaeufe">
+    <tr><th>Lauf</th><th>Epochen</th><th>Bildgröße</th><th>Präzision</th>
+      <th>Trefferquote</th><th>mAP50</th><th>mAP50-95</th><th></th></tr>`
+    + g.laeufe.map(l => {
+      const b = l.beste || {}, e = l.einstellungen || {};
+      const n = (l.zeilen || []).length;
+      return `<tr><td>${esc(l.name)}</td><td>${n}/${esc(e.epochs || "?")}</td>
+        <td>${esc(e.imgsz || "")}</td><td>${yoloZahl(b.praezision)}</td>
+        <td>${yoloZahl(b.trefferquote)}</td><td><b>${yoloZahl(b.map50)}</b></td>
+        <td>${yoloZahl(b.map50_95)}</td>
+        <td><a href="#" onclick="yoloDetails('${l.name}');return false">Kurven</a></td></tr>
+        <tr class="yolodetails" id="yd_${l.name}" style="display:none"><td colspan="8">
+          ${l.gewichte ? `<code>${esc(l.gewichte)}</code><br>` : "<i>keine Gewichte — abgebrochen oder fehlgeschlagen</i><br>"}
+          ${["results.png", "val_batch0_pred.jpg", "confusion_matrix.png", "BoxPR_curve.png"]
+            .filter(x => (l.bilder || []).includes(x))
+            .map(x => `<a href="/yolo/${g.projekt}/${l.name}/${x}" target="_blank">`
+                    + `<img src="/yolo/${g.projekt}/${l.name}/${x}" alt="${x}" title="${x}"></a>`).join("")}
+        </td></tr>`;
+    }).join("") + `</table>
+    <p class="hint">mAP50 ist die übliche Hauptzahl: 1,0 hieße jede Kupplung
+      gefunden und richtig umrandet. Präzision: wie oft eine gemeldete Box
+      stimmt. Trefferquote: wie viele Kupplungen gefunden werden.</p>`
+    : `<p class="hint">Noch kein Training.</p>`;
+}
+
+function yoloDetails(name) {
+  const z = $("yd_" + name);
+  z.style.display = z.style.display === "none" ? "" : "none";
+}
+
+async function yoloStarten() {
+  if (!YOLO.da) return say("Die YOLO-Umgebung fehlt.", "err");
+  buttonState("busy");
+  const res = await yoloRuf({tu: "starten", modell: $("yoloModell").value,
+    epochen: parseInt($("yoloEpochen").value, 10) || 50,
+    bildgroesse: parseInt($("yoloGroesse").value, 10) || 640,
+    val_anteil: (parseInt($("yoloVal").value, 10) || 20) / 100});
+  if (!res) return buttonState("idle");
+  say("YOLO-Training eingereiht …", "ok");
+  poll();
+}
+
+$("yoloBild").onchange = () => {
+  const datei = $("yoloBild").files[0];
+  if (!datei) return;
+  if (!$("yoloLauf").value) return say("Es gibt noch keinen fertigen Lauf.", "err");
+  const leser = new FileReader();
+  leser.onload = async () => {
+    $("yoloProbe").innerHTML = `<p class="hint">erkennt …</p>`;
+    const res = await yoloRuf({tu: "ausprobieren", lauf: $("yoloLauf").value,
+      bild: leser.result, schwelle: parseFloat($("yoloSchwelle").value) || 0.25});
+    if (!res) return ($("yoloProbe").innerHTML = "");
+    const e = {breite: res.breite, hoehe: res.hoehe};
+    $("yoloProbe").innerHTML = `<figure class="dsbild" style="max-width:640px">
+      <div class="dsflaeche"><img src="${leser.result}" alt="">
+        ${res.boxen.map(b => dsRahmen(b.box, e, "dsbox")).join("")}</div>
+      <figcaption>${res.boxen.length
+        ? res.boxen.map(b => `${esc(b.klasse)} ${yoloZahl(b.wert)}`).join(" · ")
+        : "nichts gefunden"}</figcaption></figure>`;
+  };
+  leser.readAsDataURL(datei);
+};
+
+// ---------- Cloud-Modelle ----------
+// Sprach- und Bildmodell lassen sich einzeln auf eine OpenAI-kompatible
+// Schnittstelle umstellen. Der Schluessel kommt nie zurueck -- nur ob einer
+// hinterlegt ist und wie er endet.
+const CLOUDPLAETZE = ["sprache", "bild"];
+
+async function cloudRuf(daten) {
+  const res = await fetch("/api/cloud", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(daten)
+  }).then(r => r.json()).catch(() => null);
+  if (!res || res.error) {
+    say(res ? res.error : "Der Server ist nicht erreichbar.", "err");
+    return null;
+  }
+  return res;
+}
+
+function zeigeCloud(e) {
+  if (!e) return;
+  CLOUDPLAETZE.forEach(p => {
+    const x = e[p] || {};
+    $(`cloud_${p}_aktiv`).checked = !!x.aktiv;
+    $(`cloud_${p}_url`).value = x.url || "";
+    $(`cloud_${p}_modell`).value = x.modell || "";
+    $(`cloud_${p}_schluessel`).value = "";
+    $(`cloud_${p}_schluessel`).placeholder = x.schluessel_da
+      ? `hinterlegt${x.schluessel_ende ? " …" + x.schluessel_ende : ""} — leer lassen behält ihn`
+      : "noch keiner hinterlegt";
+  });
+  $("cloud_bild_groesse").value = (e.bild || {}).groesse || "genau";
+  const an = CLOUDPLAETZE.filter(p => (e[p] || {}).aktiv && (e[p] || {}).modell);
+  $("cloudAuf").textContent = an.length
+    ? "Cloud: " + an.map(p => p === "bild" ? "Bild" : "Sprache").join(" + ")
+    : "Cloud-Modelle";
+}
+
+$("cloudAuf").onclick = async e => {
+  e.preventDefault();
+  const auf = $("cloudBox").style.display === "none";
+  $("cloudBox").style.display = auf ? "block" : "none";
+  if (auf) zeigeCloud(await cloudRuf({tu: "lesen"}));
+};
+
+$("cloudSpeichern").onclick = async e => {
+  e.preventDefault();
+  const einstellungen = {};
+  CLOUDPLAETZE.forEach(p => {
+    einstellungen[p] = {aktiv: $(`cloud_${p}_aktiv`).checked,
+                        url: $(`cloud_${p}_url`).value.trim(),
+                        modell: $(`cloud_${p}_modell`).value.trim(),
+                        schluessel: $(`cloud_${p}_schluessel`).value.trim()};
+  });
+  einstellungen.bild.groesse = $("cloud_bild_groesse").value;
+  const res = await cloudRuf({tu: "speichern", einstellungen});
+  if (!res) return;
+  zeigeCloud(res);
+  say("Cloud-Einstellungen gespeichert.", "ok");
+};
+
+async function cloudPruefen(platz) {
+  $(`cloud_${platz}_note`).textContent = "— prüft …";
+  const res = await cloudRuf({tu: "pruefen", platz});
+  $(`cloud_${platz}_note`).textContent = res
+    ? `— ${res.ok ? "✓" : "✗"} ${res.meldung}` : "";
+}
+cloudRuf({tu: "lesen"}).then(zeigeCloud);
 
 // ---------- Projekte ----------
 // Ein Projekt bestimmt, wohin neue Bilder gehen und welche die Galerie zeigt.
@@ -3499,6 +3899,7 @@ function poll() {
     // Der Katalog liegt ausserhalb von outputs/ -- loadGallery() sieht ihn
     // nicht, er muss eigens nachgeladen werden.
     if (mode === "seiten") seitenHolen();
+    if (mode === "training") yoloHolen();
     loadGallery();
   }, 900);
 }

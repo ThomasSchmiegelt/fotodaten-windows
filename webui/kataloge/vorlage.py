@@ -87,13 +87,32 @@ EFFECTS = {
     },
     "magazine": {
         "alias": "/magazine cover", "label": "Magazin-Cover", "needs_image": True,
-        "instruction": "Turn this into a glossy magazine cover: masthead across the top, "
-                       "cover lines down the sides, barcode and issue date, professional layout.",
+        # Ein Heft ist A4 hoch. Folgte das Format der Vorlage, waere das
+        # Cover eines quadratischen Katalogbildes ebenfalls quadratisch.
+        "aspect": "A4", "follow_reference": False,
+        "instruction": "Turn this into a glossy magazine cover in A4 portrait format: "
+                       "masthead across the top, cover lines down the sides, barcode and "
+                       "issue date, professional layout.",
     },
     "explosion": {
-        "alias": "/ptexplosion", "label": "Explosionszeichnung", "needs_image": True,
+        # Auf dem Bearbeiten-Weg zerlegt das Modell nichts: es haelt sich an
+        # das Vorlagenbild und stellt hoechstens den Gegenstand frei.
+        # Gemessen an einem Satelliten, viermal -- kein einziges Teil lag
+        # getrennt. Aus Text dagegen kam auf Anhieb eine richtige
+        # Explosionszeichnung. Ohne Bild gilt deshalb `text`, mit Bild die
+        # Anweisung.
+        "alias": "/ptexplosion", "label": "Explosionszeichnung", "needs_image": False,
+        "text": "A technical exploded-view illustration of {extra}. The object is "
+                "taken apart: every component separated from the others along its "
+                "assembly axis and floating apart with clear gaps between them, thin "
+                "dashed guide lines showing where each part belongs. Plain seamless "
+                "white background, soft even light, no scenery.",
+        # Der Hintergrund wird ausdruecklich ersetzt: aus einem Bild vor
+        # Sternenhimmel kam sonst eine Explosionszeichnung vor Sternen.
         "instruction": "Show this product as an exploded view: the parts separated along their "
-                       "assembly axes and floating apart, clean studio backdrop.",
+                       "assembly axes and floating apart. Replace the background completely "
+                       "with a plain, seamless white background -- nothing of the original "
+                       "background or scenery remains.",
     },
     "lifestyle": {
         "alias": "/lifestyle shot", "label": "Lifestyle-Aufnahme", "needs_image": True,
@@ -126,13 +145,25 @@ EFFECTS = {
         # zeigt der umgekehrte Weg -- hier muss es die Materialien nur
         # weglassen statt sie zu erfinden. Laengere Aliase werden zuerst
         # geprueft, "/cad" haengt sich also nicht an "/cad2real".
-        "alias": "/cad", "label": "Foto zu CAD", "needs_image": True,
+        # Wie bei der Explosionszeichnung: aus Text wird es ein CAD-Bild, aus
+        # dem Foto bleibt es ein Foto. Die Farbwoerter fliegen dafuer aus der
+        # Beschreibung -- "gold foil" und "blue solar panels" setzten sich
+        # sonst gegen "uniform light grey" durch.
+        "alias": "/cad", "label": "CAD-Modell", "needs_image": False,
+        "ohne_farben": True,
+        "text": "A grey CAD model, untextured solid geometry. The object: {extra}. "
+                "Every part is shown in the same uniform light grey, no colour "
+                "anywhere, no surface texture, no reflections. Every edge drawn as "
+                "a crisp dark outline, flat even shading. Plain white background "
+                "with a faint construction grid, no scenery.",
         "instruction": "Turn this into a CAD rendering of the same object: an "
                        "untextured solid model in uniform light grey, every "
                        "edge drawn as a crisp darker line, flat even shading "
                        "without reflections, highlights, grain or depth of "
-                       "field, on a plain pale background with a faint "
-                       "construction grid. Keep the geometry, the proportions "
+                       "field. Replace the background completely with a "
+                       "plain white background with a faint construction "
+                       "grid -- nothing of the original background or "
+                       "scenery remains. Keep the geometry, the proportions "
                        "and every part exactly as in the photograph -- a CAD "
                        "view shows the same object, not a new design.",
     },
@@ -355,7 +386,8 @@ SCENARIOS = {
 
 # Einstellungen, die ein Effekt oder eine Vorlage mitbringen darf.
 OVERRIDE_KEYS = ("aspect", "style", "light", "camera", "view", "mode",
-                 "sweep", "count", "lock_seed", "transparent", "base")
+                 "sweep", "count", "lock_seed", "transparent", "base",
+                 "follow_reference")
 
 
 def parse_command(text: str) -> tuple[str | None, str]:

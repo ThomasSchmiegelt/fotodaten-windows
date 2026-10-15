@@ -20,7 +20,7 @@ import re
 
 # Die Grundlage. Sie ersetzt die feste Anweisung des Effekts, statt sie zu
 # ergaenzen: jene verlangt einen Barcode, und die Maske darf ihn abwaehlen.
-GRUNDLAGE = ("Turn this into a glossy magazine cover in portrait format, "
+GRUNDLAGE = ("Turn this into a glossy magazine cover in A4 portrait format, "
              "professional editorial layout with generous white space. The "
              "photograph from the reference image is the cover image and "
              "stays exactly as it is.")

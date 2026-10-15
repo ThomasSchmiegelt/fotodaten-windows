@@ -16,12 +16,66 @@
     <a href="#" id="projektNeu" title="Neues Projekt anlegen">+ neu</a>
     <a href="#" id="projektUm" title="Projekt umbenennen">umbenennen</a>
     <a href="#" id="projektWeg" title="Projekt mit allen Bildern löschen">löschen</a>
+    <a href="#" id="cloudAuf" title="Sprach- und Bildmodell per API">Cloud-Modelle</a>
   </span>
   <span id="dims"></span>
 </header>
 
 <main>
   <section class="panel">
+    <fieldset id="cloudBox" style="display:none">
+      <legend>Cloud-Modelle</legend>
+      <p class="hint">Jede Schnittstelle, die OpenAI spricht: OpenAI selbst,
+        OpenRouter, Mistral, DeepSeek, Together, ein eigenes vLLM … Eingetragen
+        wird die <b>Basisadresse</b> samt <code>/v1</code>. Der Schlüssel liegt
+        in <code>einstellungen.json</code> neben dem Programm, nur für dich
+        lesbar und nicht im Repository; an die Seite geht er nie zurück. Leer
+        lassen behält den hinterlegten.</p>
+      <h3 class="stufe">Sprachmodell</h3>
+      <p class="hint">Übersetzen, Prompts ausformulieren, Seitenansichten, Bilder beschreiben — statt Ollama.</p>
+      <label class="check"><input type="checkbox" id="cloud_sprache_aktiv">
+        Cloud statt lokal</label>
+      <div class="axis">
+        <div>
+          <label for="cloud_sprache_url">Basisadresse</label>
+          <input id="cloud_sprache_url" placeholder="https://api.openai.com/v1">
+        </div>
+        <div>
+          <label for="cloud_sprache_modell">Modell</label>
+          <input id="cloud_sprache_modell" placeholder="gpt-4.1-mini">
+        </div>
+      </div>
+      <label for="cloud_sprache_schluessel">API-Schlüssel</label>
+      <input id="cloud_sprache_schluessel" type="password" autocomplete="off">
+      <p class="hint"><a href="#" onclick="cloudPruefen('sprache');return false">Verbindung prüfen</a>
+        <span id="cloud_sprache_note"></span></p>
+      <h3 class="stufe">Bildmodell</h3>
+      <p class="hint">Rechnet die Bilder statt Qwen-Image auf der eigenen Karte. Seed und negativer Prompt wirken dort nicht.</p>
+      <label class="check"><input type="checkbox" id="cloud_bild_aktiv">
+        Cloud statt lokal</label>
+      <div class="axis">
+        <div>
+          <label for="cloud_bild_url">Basisadresse</label>
+          <input id="cloud_bild_url" placeholder="https://api.openai.com/v1">
+        </div>
+        <div>
+          <label for="cloud_bild_modell">Modell</label>
+          <input id="cloud_bild_modell" placeholder="gpt-image-1">
+        </div>
+      </div>
+      <label for="cloud_bild_schluessel">API-Schlüssel</label>
+      <input id="cloud_bild_schluessel" type="password" autocomplete="off">
+      <label for="cloud_bild_groesse">Bildgröße</label>
+      <select id="cloud_bild_groesse">
+        <option value="genau">genau wie lokal (Breite × Höhe)</option>
+        <option value="openai">nächstes OpenAI-Format (1024², 1536×1024, 1024×1536)</option>
+        <option value="auto">auto — der Anbieter entscheidet</option>
+      </select>
+      <p class="hint"><a href="#" onclick="cloudPruefen('bild');return false">Verbindung prüfen</a>
+        <span id="cloud_bild_note"></span></p>
+      <p class="hint"><a href="#" id="cloudSpeichern"><b>Speichern</b></a></p>
+    </fieldset>
+
     <div id="chatBox" style="display:none">
       <div class="chatbar">
         <textarea id="chat" rows="4"
@@ -52,6 +106,8 @@
       <button id="tab-geschichte">Geschichte</button>
       <button id="tab-katalog">Katalog</button>
       <button id="tab-seiten">Sechs Seiten</button>
+      <button id="tab-datensatz">Datensatz</button>
+      <button id="tab-training">Training</button>
     </div>
 
     <fieldset id="bausteinBox" style="display:none">
@@ -396,6 +452,75 @@
         <a href="#" id="gsSofort">Bilder und Video jetzt erzeugen</a></p>
     </fieldset>
 
+    <fieldset id="trainingTabBox" style="display:none">
+      <legend>YOLO-Training</legend>
+      <p class="hint" id="yoloKopf"></p>
+      <table class="yolotab">
+        <tr><th><label for="yoloModell">Modell</label></th>
+          <td><select id="yoloModell"></select></td>
+          <td class="hint">Nano reicht zum Anfangen. Größer lohnt erst ab
+            einigen hundert Bildern.</td></tr>
+        <tr><th><label for="yoloEpochen">Epochen</label></th>
+          <td><input type="number" id="yoloEpochen" value="50" min="1" max="1000"></td>
+          <td class="hint">Wie oft YOLO den ganzen Datensatz sieht. 50–100
+            ist üblich; bei wenigen Bildern lernt es sonst auswendig.</td></tr>
+        <tr><th><label for="yoloGroesse">Bildgröße</label></th>
+          <td><select id="yoloGroesse">
+            <option value="640">640 px</option>
+            <option value="960">960 px</option>
+            <option value="1280">1280 px</option>
+          </select></td>
+          <td class="hint">Die Kupplung ist klein im Bild — 960 erkennt sie
+            besser als 640, braucht aber mehr Speicher und Zeit.</td></tr>
+        <tr><th><label for="yoloVal">Validierung</label></th>
+          <td><input type="number" id="yoloVal" value="20" min="5" max="50"> %</td>
+          <td class="hint">Dieser Anteil wird nicht trainiert, nur gemessen.
+            Ganze Aufträge bleiben zusammen, damit YOLO nicht den Nachbarn
+            aus derselben Serie wiedererkennt.</td></tr>
+      </table>
+      <p class="hint">Gestartet wird mit dem großen Knopf unten. Das Training
+        reiht sich in die Warteschlange ein wie ein Bild — es braucht die
+        Grafikkarte für sich.</p>
+
+      <div class="head" style="margin-top:14px"><h2>Läufe</h2></div>
+      <div id="yoloLaeufe"></div>
+
+      <div class="head" style="margin-top:14px"><h2>Ausprobieren</h2></div>
+      <div class="axis">
+        <div>
+          <label for="yoloLauf">Lauf</label>
+          <select id="yoloLauf"></select>
+        </div>
+        <div>
+          <label for="yoloSchwelle">Mindestsicherheit</label>
+          <input type="number" id="yoloSchwelle" value="0.25" min="0.01" max="0.99" step="0.05">
+        </div>
+      </div>
+      <label for="yoloBild">Ein Foto wählen — am besten ein echtes</label>
+      <input type="file" id="yoloBild" accept="image/*">
+      <div id="yoloProbe"></div>
+    </fieldset>
+
+    <fieldset id="datensatzBox" style="display:none">
+      <legend>Datensatz</legend>
+      <p class="hint" id="dsKopf"></p>
+      <div class="axis">
+        <div>
+          <label for="dsFilter">Zeigen</label>
+          <select id="dsFilter">
+            <option value="pruefen">zu prüfen</option>
+            <option value="ok">aufgenommen</option>
+            <option value="verworfen">verworfen</option>
+          </select>
+        </div>
+        <div></div>
+      </div>
+      <p class="hint">Rot ist die Box, die ins Label geht. Gestrichelt, was
+        Grounding DINO gefunden hat. <b>Mit der Maus über das Bild
+        ziehen</b> setzt eine neue Box; „aufnehmen“ übernimmt sie.</p>
+      <div id="dsListe"></div>
+    </fieldset>
+
     <fieldset id="katalogBox" style="display:none">
       <legend>Katalog</legend>
       <p class="hint">Alle Bausteine aus allen Projekten. Von hier lässt sich
@@ -473,15 +598,37 @@
 
       <label for="seitenStil">Stil</label>
       <select id="seitenStil"></select>
-      <p class="hint">
-        <a href="#" id="seitenVorschlag"><b>Vorschlag schreiben lassen</b></a> ·
-        <a href="#" id="seitenGo">Sechs Seiten erzeugen</a></p>
-      <p class="hint">Der Vorschlag füllt das Feld oben mit allen sechs
-        Seiten samt <code>/-</code>-Zeilen — auf Englisch, so wie es ins
-        Bild geht. Lies ihn durch, ändere was nicht stimmt, und erzeuge
-        erst dann. Was du selbst geschrieben hast, bleibt stehen; der
-        Vorschlag füllt nur die Lücken. Zehn Minuten Rechenzeit sind zu
-        viel, um einen Fehler erst im fertigen Bild zu sehen.</p>
+
+      <div id="seitenAktiv"></div>
+
+      <h3 class="stufe">1 · Erstes Bild</h3>
+      <p class="hint"><a href="#" id="seitenErstes"><b>Erstes Bild
+        erzeugen</b></a> — der Gegenstand einmal, schräg von vorn oben,
+        schwebend, mit Stil und Hintergrund. Ein Bild statt sechs: erst
+        sehen, ob er so aussieht wie gedacht. Gefällt er nicht, Beschreibung
+        ändern und noch einmal.</p>
+
+      <h3 class="stufe">2 · Prompts für die sechs Seiten</h3>
+      <p class="hint"><a href="#" id="seitenVorschlag"><b>Prompts schreiben
+        lassen</b></a> — das Sprachmodell schreibt zu <b>genau dem
+        Gegenstand im ersten Bild</b>, was jede Seite zeigt, samt
+        <code>/-</code>-Zeilen, ins Feld oben. Lies es durch und ändere,
+        was nicht stimmt. Was du selbst geschrieben hast, bleibt stehen.</p>
+
+      <h3 class="stufe">3 · Sechs Seiten</h3>
+      <p class="hint"><a href="#" id="seitenGo"><b>Sechs Seiten
+        erzeugen</b></a> — in denselben Katalogeintrag wie das erste Bild,
+        mit seinem Seed.</p>
+
+      <h3 class="stufe">4 · Effekte</h3>
+      <p class="hint">Der Prompt des ersten Bildes geht mit dem gewählten
+        Effekt in den passenden Reiter — dort lässt sich noch nachstellen,
+        dann erzeugen. Das <b>Cover</b> setzt auf dem ersten Bild auf
+        (Bearbeiten, A4, Titel und Schlagzeilen in der Maske).
+        <b>Explosionszeichnung</b> und <b>CAD-Modell</b> entstehen aus dem
+        Prompt allein (Text → Bild, weißer Grund): aus dem Foto heraus
+        zerlegt das Modell nichts.<br>
+        <span id="seitenEffekte"></span></p>
       <div id="seitenJetzt"></div>
 
       <div class="head" style="margin-top:14px"><h2>Katalog</h2>
@@ -823,6 +970,27 @@
         <input type="checkbox" id="transparent">
         <label for="transparent">Transparenter Hintergrund (RGBA)</label>
       </div>
+    </fieldset>
+
+    <fieldset id="boxTraining">
+      <legend>Trainingsdaten</legend>
+      <label class="check"><input type="checkbox" id="trainingAn">
+        Bounding Box suchen und in den Datensatz legen</label>
+      <div class="axis">
+        <div>
+          <label for="trainingKlasse">Klasse</label>
+          <input id="trainingKlasse" value="anhaengerkupplung">
+        </div>
+        <div>
+          <label for="trainingSuche">Suchbegriff (englisch)</label>
+          <input id="trainingSuche" value="tow hitch">
+        </div>
+      </div>
+      <p class="hint">Nach dem Rechnen sucht <b>Qwen3-VL</b> die Box,
+        <b>Grounding DINO</b> prüft gegen. Sind sich beide einig, ist das Bild
+        aufgenommen; sonst landet es auf der Prüfliste im Reiter
+        <b>Datensatz</b>. Abgelegt wird
+        als YOLO und COCO unter <code>projekte/&lt;Projekt&gt;/datensatz/</code>.</p>
     </fieldset>
 
     <fieldset id="boxFein">

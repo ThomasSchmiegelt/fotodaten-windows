@@ -37,16 +37,27 @@ def looks_german(text: str) -> bool:
     return bool(text and GERMAN.search(text))
 
 
-def translate(fields: dict[str, str], model: str | None = None) -> dict[str, str]:
+def translate(fields: dict[str, str], model: str | None = None,
+              immer: tuple[str, ...] = ()) -> dict[str, str]:
     """Uebersetzt die uebergebenen Felder in einem einzigen Aufruf.
+
+    `immer` nennt Felder, die ohne Pruefung mitgehen. Fuer kurze Angaben:
+    ein einzelnes Hauptwort wie "Sternenhimmel" hat keinen Umlaut und kein
+    Artikelwort, die Erkennung haelt es fuer englisch -- und das Bildmodell
+    bekommt ein Wort, das es nicht kennt.
 
     Zurueck kommen nur die Felder, die sich tatsaechlich geaendert haben. Faellt
     Ollama aus, kommt ein leeres Ergebnis -- der Auftrag laeuft dann mit dem
     Originaltext weiter, statt zu scheitern.
     """
-    offen = {k: v for k, v in fields.items() if v and v.strip() and looks_german(v)}
+    offen = {k: v for k, v in fields.items()
+             if v and v.strip() and (k in immer or looks_german(v))}
     if not offen:
         return {}
+    # Die Schluessel gehen als f0, f1, ... hinaus. Deutsche Schluessel
+    # uebersetzt das Sprachmodell gleich mit -- aus "hintergrund" wurde
+    # "background", und die Antwort passte zu keinem Feld mehr.
+    namen = dict(zip((f"f{i}" for i in range(len(offen))), offen))
 
     body = {
         "model": model or MODEL,
@@ -54,11 +65,13 @@ def translate(fields: dict[str, str], model: str | None = None) -> dict[str, str
         "options": {"temperature": 0.1, "num_predict": 800},
         "messages": [
             {"role": "system", "content": TRANSLATE_SYSTEM},
-            {"role": "user", "content": json.dumps(offen, ensure_ascii=False)},
+            {"role": "user", "content": json.dumps(
+                {f: offen[k] for f, k in namen.items()}, ensure_ascii=False)},
         ],
     }
     raw = antwort(body)
     if not isinstance(raw, dict):
         return {}
-    return {k: raw[k].strip() for k in offen
-            if isinstance(raw.get(k), str) and raw[k].strip() and raw[k].strip() != offen[k]}
+    return {k: raw[f].strip() for f, k in namen.items()
+            if isinstance(raw.get(f), str) and raw[f].strip()
+            and raw[f].strip() != offen[k]}

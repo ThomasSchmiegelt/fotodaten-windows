@@ -39,6 +39,9 @@ import geschichte  # noqa: E402
 import sprache as chat  # noqa: E402
 import ablauf  # noqa: E402
 import demo  # noqa: E402
+import cloud  # noqa: E402
+import datensatz  # noqa: E402
+import yolo  # noqa: E402
 import sechsseiten  # noqa: E402
 from kataloge import (  # noqa: E402
     AXIS_OFF, EFFECTS, EINSTELLUNGEN, FOLGEN, GEZEICHNET, GROUP_ACTIONS,
@@ -232,6 +235,26 @@ class Handler(BaseHTTPRequestHandler):
             if len(teile) != 3:
                 return self._json(404, {"error": "not found"})
             datei = sechsseiten.bildpfad(*teile)
+            if not datei:
+                return self._json(404, {"error": "not found"})
+            with open(datei, "rb") as fh:
+                return self._send(200, fh.read(), "image/png")
+
+        if path.startswith("/yolo/"):
+            # Kurven und Beispielbilder eines Trainingslaufs.
+            teile = path[len("/yolo/"):].split("/")
+            datei = yolo.bildpfad(*teile) if len(teile) == 3 else None
+            if not datei:
+                return self._json(404, {"error": "not found"})
+            with open(datei, "rb") as fh:
+                return self._send(200, fh.read(),
+                                  "image/png" if datei.endswith(".png") else "image/jpeg")
+
+        if path.startswith("/datensatz/"):
+            # Die Bilder des Trainingsdatensatzes: aufgenommen, zu pruefen
+            # oder verworfen -- jeder Teil gegen sein Muster geprueft.
+            teile = path[len("/datensatz/"):].split("/")
+            datei = datensatz.bildpfad(*teile) if len(teile) == 3 else None
             if not datei:
                 return self._json(404, {"error": "not found"})
             with open(datei, "rb") as fh:
@@ -959,24 +982,34 @@ class Handler(BaseHTTPRequestHandler):
                 if engine.lock.locked():
                     return self._json(409, {"error": "Es laeuft gerade ein Auftrag"})
                 roh = str(params.get("text") or "").strip()
-                if not roh:
+                # Nach dem ersten Bild schreibt das Sprachmodell die Ansichten
+                # zu genau dem Gegenstand, der darin steckt -- und laesst den
+                # Gegenstandstext stehen. Neu ausformuliert waere er ein
+                # anderer Gegenstand als der im Bild.
+                vorher = sechsseiten.eintrag(
+                    str(params.get("eintrag_projekt") or projekt),
+                    str(params.get("eintrag") or "")) \
+                    if params.get("eintrag") else None
+                fest = (vorher or {}).get("prompt") or ""
+                if not roh and not fest:
                     return self._json(400, {"error": "Bitte den Gegenstand beschreiben"})
                 # Was schon dasteht, bleibt: der Vorschlag fuellt nur die
                 # Luecken. Wer eine Seite selbst geschrieben hat, will sie
                 # nicht ueberschrieben sehen.
                 eigen = sechsseiten.lies_eingabe(roh)
                 melden("Das Sprachmodell schreibt den Vorschlag")
-                plan = chat.seiten_plan(eigen["allgemein"] or roh,
+                plan = chat.seiten_plan(fest or eigen["allgemein"] or roh,
                                         str(params.get("modell") or "") or None)
                 melden("")
                 if not plan["sichten"]:
                     return self._json(502, {"error":
                         "Das Sprachmodell hat nichts geliefert."})
                 return self._json(200, {"text": sechsseiten.als_eingabe(
-                    plan["gegenstand"] or eigen["allgemein"],
+                    fest or plan["gegenstand"] or eigen["allgemein"],
                     {**plan["sichten"], **eigen["sichten"]},
                     {**plan["ohne"], **eigen["ohne"]},
-                    eigen["hintergrund"])})
+                    eigen["hintergrund"]
+                    or (vorher or {}).get("hintergrund") or "")})
 
             if was == "loeschen":
                 # Loescht Bilder auf der Platte -- wie beim Projekt nur vom
@@ -989,11 +1022,85 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200 if gut else 404, {"ok": gut})
 
             if not (params.get("text") or "").strip() \
-                    and not params.get("gegenstand"):
+                    and not params.get("gegenstand") \
+                    and not params.get("eintrag"):
                 return self._json(400, {"error":
                     "Bitte den Gegenstand beschreiben oder einen Baustein waehlen"})
             auftrag = einreihen("sechsseiten", params)
             return self._json(202, {"ok": True, "nummer": auftrag["nummer"]})
+
+        if path == "/api/yolo":
+            params = self._body()
+            if params is None:
+                return self._json(400, {"error": "ungueltiges JSON"})
+            projekt = projekte.aktiv()
+            was = params.get("tu") or "liste"
+            if was == "liste":
+                z = datensatz.uebersicht(projekt)["zahlen"]
+                return self._json(200, {"projekt": projekt, "da": yolo.verfuegbar(),
+                                        "modelle": [{"key": k, "label": v}
+                                                    for k, v in yolo.MODELLE.items()],
+                                        "aufgenommen": z.get("ok", 0),
+                                        "laeufe": yolo.laeufe(projekt)})
+            if was == "starten":
+                if not yolo.verfuegbar():
+                    return self._json(400, {"error": "Die YOLO-Umgebung fehlt"})
+                auftrag = einreihen("yolo", params)
+                return self._json(202, {"ok": True, "nummer": auftrag["nummer"]})
+            if was == "ausprobieren":
+                try:
+                    bild = decode(params.get("bild") or "")
+                    puffer = io.BytesIO()
+                    bild.convert("RGB").save(puffer, format="PNG")
+                    boxen = yolo.erkennen(projekt, str(params.get("lauf") or ""),
+                                          puffer.getvalue(),
+                                          float(params.get("schwelle") or 0.25))
+                except Exception as exc:
+                    return self._json(400, {"error": str(exc)})
+                return self._json(200, {"boxen": boxen, "breite": bild.size[0],
+                                        "hoehe": bild.size[1]})
+            return self._json(400, {"error": "unbekannt"})
+
+        if path == "/api/datensatz":
+            # Die Pruefliste: ansehen, aufnehmen, verwerfen, Box neu setzen.
+            params = self._body()
+            if params is None:
+                return self._json(400, {"error": "ungueltiges JSON"})
+            projekt = projekte.aktiv()
+            if (params.get("tu") or "liste") == "liste":
+                return self._json(200, {**datensatz.uebersicht(projekt),
+                                        "projekt": projekt})
+            if params.get("tu") == "setzen":
+                e = datensatz.setzen(projekt, str(params.get("datei") or ""),
+                                     str(params.get("status") or ""),
+                                     params.get("box"))
+                if not e:
+                    return self._json(400, {"error": "Das ging nicht -- ohne Box "
+                                            "laesst sich kein Bild aufnehmen"})
+                return self._json(200, e)
+            return self._json(400, {"error": "unbekannt"})
+
+        if path == "/api/cloud":
+            # Cloud-Modelle: lesen, speichern, ausprobieren. Der Schluessel
+            # geht nie an die Seite zurueck. Speichern nur vom eigenen
+            # Rechner -- im Netz koennte sonst jeder die Bilder ueber ein
+            # fremdes Konto umleiten.
+            params = self._body()
+            if params is None:
+                return self._json(400, {"error": "ungueltiges JSON"})
+            was = params.get("tu") or "lesen"
+            if was == "lesen":
+                return self._json(200, cloud.oeffentlich())
+            if not self._nur_hier():
+                return self._json(403, {"error": "Nur vom Rechner des Servers aus"})
+            if was == "speichern":
+                return self._json(200, cloud.schreiben(params.get("einstellungen") or {}))
+            if was == "pruefen":
+                if engine.lock.locked() and params.get("platz") == "sprache" \
+                        and not cloud.aktiv("sprache"):
+                    return self._json(409, {"error": "Es laeuft gerade ein Auftrag"})
+                return self._json(200, cloud.pruefen(str(params.get("platz") or "")))
+            return self._json(400, {"error": "unbekannt"})
 
         if path == "/api/projekt":
             # Anlegen, wechseln, umbenennen, loeschen. Alles am eigenen

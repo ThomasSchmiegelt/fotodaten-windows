@@ -20,6 +20,7 @@ import gc
 import math
 import os
 import random
+import re
 import threading
 import time
 
@@ -30,6 +31,7 @@ import torch
 from diffusers import QwenImage21Pipeline
 from diffusers.pipelines.qwenimage21.pipeline_qwenimage21 import calculate_dimensions
 
+import cloud  # noqa: E402
 from kataloge import (
     ANGLES, AXIS_OFF, CAMERAS, DEVICES, EFFECTS, FORMS, GROUP_ACTIONS, LIGHTS,
     BEKLEIDUNGEN, HALTUNGEN, MATERIALS, PAINTS, PALETTEN, SCENARIOS, SCENES,
@@ -69,6 +71,9 @@ ASPECT_RATIOS = {
     "2:3": 2 / 3,
     "16:9": 16 / 9,
     "9:16": 9 / 16,
+    # Ein Blatt Papier: 210 x 297 mm, Hochformat. Fuers Titelblatt -- ein
+    # Heft hat dieses Format, und 2:3 oder 3:4 sieht daneben gedrungen aus.
+    "A4": 210 / 297,
 }
 
 
@@ -107,6 +112,50 @@ def _free() -> None:
     if torch.cuda.is_available():
         torch.cuda.synchronize()
         torch.cuda.empty_cache()
+
+
+# Farben und Oberflaechen, die ein graues Modell nicht hat.
+FARBWORT = re.compile(
+    r"\b(?:gold(?:en)?|silver(?:y)?|blue|white|black|red|green|yellow|orange|"
+    r"purple|pink|brown|grey|gray|copper|bronze|chrome|shiny|shimmering|"
+    r"glossy|metallic|reflective|gold-finished|gold-foil)\b[ -]?", re.I)
+
+
+def _ohne_farben(text: str) -> str:
+    return re.sub(r"\s{2,}", " ", FARBWORT.sub("", text or "")).strip()
+
+
+def _dekodieren(pipe, latents, width: int, height: int):
+    """Die Latents zum Bild machen -- ungekachelt, wo es irgend geht.
+
+    Das Dekodieren steht hier und nicht in der Pipeline, damit ein
+    Speicherueberlauf nicht das Bild kostet. Mit Vorlagenbild reichte der
+    Platz bei 1024 x 1024 nicht mehr: Explosionszeichnung und CAD brachen
+    beim Dekodieren ab. Gekachelt dekodieren hiesse aber wieder Naehte auf
+    glatten hellen Flaechen -- gerade auf dem weissen Grund, den diese
+    beiden Effekte haben. Deshalb geht der Transformer dann kurz in den
+    Hauptspeicher und die VAE dekodiert in einem Stueck.
+    """
+    with torch.no_grad():
+        latents = pipe._unpack_latents(latents, height, width, pipe.vae_scale_factor)
+        latents = latents.to(pipe.vae.dtype)
+        cfg = pipe.vae.config
+        mittel = torch.tensor(cfg.latents_mean).view(1, cfg.z_dim, 1, 1, 1)
+        streu = torch.tensor(cfg.latents_std).view(1, cfg.z_dim, 1, 1, 1)
+        latents = latents * streu.to(latents.device, latents.dtype) \
+            + mittel.to(latents.device, latents.dtype)
+        _free()
+        try:
+            bild = pipe.vae.decode(latents, return_dict=False)[0][:, :, 0]
+        except torch.OutOfMemoryError:
+            _free()
+            pipe.transformer.to("cpu")
+            _free()
+            try:
+                bild = pipe.vae.decode(latents, return_dict=False)[0][:, :, 0]
+            finally:
+                pipe.transformer.to(DEVICE)
+        return pipe.image_processor.postprocess(bild, output_type="pil")[0]
 
 
 def _karte() -> dict:
@@ -219,6 +268,29 @@ class Engine:
         """
         self._cancel = True
         self.aborted = True
+
+    # -- Cloud ------------------------------------------------------------
+    def _aus_der_cloud(self, jobs, images, width, height, effect, form,
+                       on_image) -> list:
+        """Dieselben Auftraege, nur vom Cloud-Bildmodell gerechnet.
+
+        Alles davor -- Prompt, Effekt, Varianten, Seeds -- ist dasselbe wie
+        lokal; nur das Rechnen geht hinaus. Der Seed steht weiter in den
+        Bilddaten, wirkt aber nicht: die Schnittstelle kennt keinen.
+        """
+        results = []
+        for index, job in enumerate(jobs, start=1):
+            if self._cancel:
+                break
+            self._set(state="denoising", image=index, step=0, total=1,
+                      message=f"Bild {index}/{len(jobs)} · Cloud-Modell rechnet")
+            image_out = cloud.bild(job["prompt"], width, height, images or None)
+            meta = {k: v for k, v in job.items() if k != "embeds"}
+            meta.update(index=index, effect=effect, form=form, cloud=True)
+            results.append(meta)
+            if on_image:
+                on_image(meta, image_out)
+        return results
 
     # -- Laden ------------------------------------------------------------
     def _load(self, kacheln: bool = True, **skip):
@@ -334,7 +406,13 @@ class Engine:
         if form in FORMS:
             text = FORMS[form]["template"].format(extra=text)
         spec = EFFECTS.get(effect or "", {})
-        if spec.get("instruction"):
+        if spec.get("text") and not bilder:
+            # Ohne Bild: der Effekt hat eine eigene Fassung, in die der
+            # Benutzertext als Gegenstand eingesetzt wird.
+            if spec.get("ohne_farben"):
+                text = _ohne_farben(text)
+            text = spec["text"].format(extra=text[:1].lower() + text[1:]).strip()
+        elif spec.get("instruction"):
             # Die Anweisung steht vorn, der Benutzertext praezisiert sie.
             text = f"{spec['instruction']} {text}".strip()
         if mode == "gruppe":
@@ -439,6 +517,14 @@ class Engine:
         else:
             # Mit Namen statt der Reihe nach: die Achsenliste waechst, und eine
             # verrutschte Stellung faellt sonst erst am falschen Bild auf.
+            # "alles wuerfeln" zieht aus allen Tabellen -- auch aus denen fuer
+            # Menschen: Haltung, Kleidung, Cafe und Schlafzimmer, eine Kamera
+            # "auf die beschriebene Person". Im Varianten-Reiter mit einem
+            # Fahrzeug oder Gegenstand standen dadurch ploetzlich Leute im
+            # Bild, obwohl das Basisbild keinen zeigte. Dort heisst wuerfeln
+            # deshalb: die Achsen dieser Motivart, wie bei "Varianten".
+            if mode == "varianten" and sweep == "random" and subject != "person":
+                sweep = "varianten"
             jobs = self.plan(text, count, seed, sweep, view=view, style=style,
                              light=light, camera=camera, paint=paint,
                              palette=palette, scene=scene, angle=angle,
@@ -461,6 +547,10 @@ class Engine:
             width, height = dimensions_for(aspect, base)
 
         cond_base = reference_resolution(base, len(images))
+
+        if cloud.aktiv("bild"):
+            return self._aus_der_cloud(jobs, images, width, height, effect,
+                                       form, on_image)
 
         # --- Phase 1: alle Prompts einbetten ------------------------------
         encoder = self._load(transformer=None, vae=None)
@@ -530,11 +620,13 @@ class Engine:
                     true_cfg_scale=true_cfg_scale,
                     generator=torch.Generator(DEVICE).manual_seed(job["seed"]),
                     callback_on_step_end=on_step,
+                    output_type="latent",
                 )
                 # Kein Abbruch hier: das Bild ist fertig gerechnet, also
                 # wird es auch abgelegt. Gestoppt wird danach, am Kopf der
                 # naechsten Runde.
-                image_out = out.images[0]
+                image_out = _dekodieren(pipe, out.images, width, height)
+                del out
                 # Alles aus dem Auftrag ausser den Einbettungen. Eine zweite
                 # Schluesselliste hier waere eine Falle: eine neue Achse landete
                 # sonst im Prompt, aber nicht in den Bilddaten.

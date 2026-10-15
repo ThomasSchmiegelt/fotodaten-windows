@@ -67,7 +67,9 @@ def catalog() -> dict:
                           for k, v in GROUP_ACTIONS.items()],
         "templates": TEMPLATES,
         "effects": [{"key": k, "label": v["label"], "alias": v["alias"],
-                     "needs_image": v["needs_image"], **overrides(v)}
+                     "needs_image": v["needs_image"],
+                     # Hat eine eigene Fassung fuer Text -> Bild.
+                     "aus_text": bool(v.get("text")), **overrides(v)}
                     for k, v in EFFECTS.items()],
         "forms": [{"key": k, "label": v["label"], **overrides(v)} for k, v in FORMS.items()],
     }

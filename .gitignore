@@ -25,3 +25,9 @@ bildmachen.py.bak
 
 __pycache__/
 *.py[cod]
+
+# Cloud-Zugaenge samt API-Schluessel -- gehoeren nie ins Repository
+einstellungen.json
+
+# Ultralytics in eigener Umgebung (nutzt das PyTorch aus qwen_bild mit)
+yolo_umgebung/

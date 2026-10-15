@@ -37,6 +37,8 @@ import bausteine  # noqa: E402
 import cover  # noqa: E402
 import baender  # noqa: E402
 import szenenbau  # noqa: E402
+import datensatz  # noqa: E402
+import yolo  # noqa: E402
 import sechsseiten  # noqa: E402
 from torwache import torwaechter  # noqa: E402
 
@@ -63,6 +65,8 @@ current = {"files": [], "error": None, "translated": {}, "stage": "",
            # liegen und deshalb nicht in "files" gehoeren -- die Oberflaeche
            # baut daraus sonst Verweise auf /outputs/, die ins Leere zeigen.
            "seiten": {},
+           # Was der letzte Auftrag in den Datensatz gelegt hat.
+           "datensatz": {},
            # Die Stufen eines Szenenaufbaus: was in welcher Reihenfolge
            # entsteht. Eigenes Feld, weil "gliederung" die Szenenprompts
            # der Geschichte fuehrt und die Oberflaeche daraus nachlaedt.
@@ -111,7 +115,10 @@ def _titel(art: str, params: dict) -> str:
         return f"Szene aufbauen: {text[:44]}" if text else "Szene aufbauen"
     if art == "sechsseiten":
         was = (params.get("name") or params.get("text") or "").strip()
-        return f"Sechs Seiten: {was[:44]}" if was else "Sechs Seiten"
+        art = "Erstes Bild" if params.get("stufe") == "erstes" else "Sechs Seiten"
+        return f"{art}: {was[:44]}" if was else art
+    if art == "yolo":
+        return f"YOLO trainieren: {params.get('modell') or 'yolo11n'}, {params.get('epochen') or 50} Epochen"
     if art == "demo":
         if params.get("bloecke"):
             return f"Ablauf, {len(params['bloecke'])} Bloecke"
@@ -218,6 +225,8 @@ def _buendelbar(a: dict, b: dict) -> bool:
             return False
         if p.get("sweep") or p.get("prompts") or p.get("transparent"):
             return False
+        if (p.get("training") or {}).get("an"):
+            return False            # die Boxen gehoeren zu genau diesem Auftrag
         if int(p.get("count", 1) or 1) != 1:
             return False
     return all(str(pa.get(k, "")) == str(pb.get(k, "")) for k in GLEICH)
@@ -273,7 +282,7 @@ def _abarbeiten(auftrag: dict, weitere: list[dict] | None = None) -> None:
                  else f"{len(alle)} Auftraege zusammen")
         current.update(files=[], error=None, translated={}, video=None,
                        gelesen={}, tor=[], gliederung=[], expose={},
-                       bau={}, seiten={},
+                       bau={}, seiten={}, datensatz={},
                        stage="wird vorbereitet",
                        fortschritt={"ist": 0, "von": 0},
                        nummer=auftrag["nummer"], titel=titel)
@@ -282,7 +291,7 @@ def _abarbeiten(auftrag: dict, weitere: list[dict] | None = None) -> None:
                       "expose": run_expose, "ergaenzen": run_ergaenzen,
                       "aufbau": run_aufbau, "prosa": run_prosa,
                       "szenenbau": run_szenenbau,
-                      "sechsseiten": run_sechsseiten}
+                      "sechsseiten": run_sechsseiten, "yolo": run_yolo}
             laeufe.get(auftrag["art"], run_job)(auftrag["params"])
         else:
             # Ein Ladevorgang fuer alle: die fertigen Prompts gehen als Liste
@@ -485,10 +494,12 @@ def run_job(params: dict) -> None:
         kind = params.get("mode") or ("edit" if refs else "t2i")
 
         manifest = os.path.join(ziel(), f"{stamp}_{kind}.jsonl") if kind == "varianten" else None
+        entstanden = []
 
         def on_image(meta, image):
             name = _save(meta, image, stamp, kind)
             current["files"].append(name)
+            entstanden.append((os.path.join(ziel(), name), dict(meta)))
             if manifest:
                 # Eine Zeile je Bild: was variiert wurde, direkt neben der Datei.
                 # Damit laesst sich der Satz spaeter filtern oder ausbalancieren.
@@ -520,7 +531,23 @@ def run_job(params: dict) -> None:
         engine.run_series(**_series_kwargs(params, refs, kind, on_image),
                           **({"prompts": fertige} if fertige else {}))
         done = len(current["files"])
-        engine.note("idle", f"fertig: {done} Bild(er)" if done else "abgebrochen")
+        meldung = f"fertig: {done} Bild(er)" if done else "abgebrochen"
+
+        # Trainingsdaten: erst jetzt, wenn das Bildmodell die Karte frei
+        # gemacht hat. Das Basisbild zaehlt nur bei Varianten -- dort steht
+        # die Kamera, solange sie nicht ausdruecklich gewuerfelt wird.
+        training = params.get("training") or {}
+        if training.get("an") and entstanden and not engine.aborted:
+            zahl = datensatz.aufnehmen(
+                _projekt_des_laufs, entstanden, training.get("klasse") or "",
+                training.get("suche") or "",
+                basis=refs[0] if refs and kind == "varianten" else None,
+                melden=melden)
+            melden("")
+            current["datensatz"] = zahl
+            meldung += (f" · Datensatz: {zahl['ok']} aufgenommen, "
+                        f"{zahl['pruefen']} zu prüfen")
+        engine.note("idle", meldung)
     except Exception:
         err = traceback.format_exc()
         print(err, file=sys.stderr)
@@ -989,7 +1016,8 @@ def run_szenenbau(params: dict) -> None:
         engine.note("idle", "Aufbau fehlgeschlagen")
 
 
-def _gegenstandsplan(params: dict, projekt: str) -> dict:
+def _gegenstandsplan(params: dict, projekt: str, fest: str = "",
+                     nur_gegenstand: bool = False) -> dict:
     """Alles, was die sechs Prompts brauchen: Gegenstand, Ansichten, Grund, Ausschluss.
 
     Drei Quellen, und sie gelten in dieser Rangfolge:
@@ -1037,7 +1065,7 @@ def _gegenstandsplan(params: dict, projekt: str) -> dict:
         felder["o_alle"] = eingabe["ohne_alle"]
     if felder:
         melden("Die eigenen Angaben werden uebersetzt")
-        felder.update(chat.translate(felder))
+        felder.update(chat.translate(felder, immer=("hintergrund",)))
 
     hintergrund = felder.pop("hintergrund", "")
     ohne_alle = felder.pop("o_alle", "")
@@ -1052,17 +1080,37 @@ def _gegenstandsplan(params: dict, projekt: str) -> dict:
     fehlend = [s for s in sechsseiten.SEITEN if s not in sichten]
     plan = {"text": "", "sichten": sichten, "hintergrund": hintergrund,
             "ohne": ohne, "ohne_alle": ohne_alle}
+    if nur_gegenstand:
+        # Fuers erste Bild: nur der Gegenstand. Die Ansichten schreibt das
+        # Sprachmodell erst danach, aus genau dem Text, der im Bild steckt.
+        fehlend = []
 
-    if not params.get("ausformulieren", True) or not fehlend:
-        # Ohne Sprachmodell -- oder weil alle sechs Seiten schon dastehen.
-        # Der Gegenstand selbst will dann nur noch uebersetzt werden.
+    if fest:
+        # Der Gegenstand steht seit dem ersten Bild fest. Ausformuliert wird
+        # er nicht noch einmal -- ein zweiter Wurf des Sprachmodells waere
+        # ein anderer Gegenstand als der, den man gerade gesehen hat.
+        if params.get("ausformulieren", True) and fehlend:
+            melden(f"Das Sprachmodell schreibt {len(fehlend)} Ansichten")
+            geschrieben = chat.seiten_plan(fest, params.get("modell") or None)
+            for seite in fehlend:
+                if geschrieben.get("sichten", {}).get(seite):
+                    sichten[seite] = geschrieben["sichten"][seite]
+        return dict(plan, text=fest, sichten=sichten)
+
+    # Ohne Sprachmodell -- oder weil alle sechs Seiten schon dastehen, oder
+    # weil ein Baustein den Gegenstand mitbringt und nur er gefragt ist. Der
+    # Gegenstand selbst will dann nur noch uebersetzt werden.
+    if not params.get("ausformulieren", True) \
+            or (nur_gegenstand and aus_baustein) \
+            or (not fehlend and not nur_gegenstand):
         if aus_baustein:
             return dict(plan, text=chat.ohne_zahlenvergleich(aus_baustein))
         neu = chat.translate({"prompt": text})
         return dict(plan, text=chat.ohne_zahlenvergleich(
             (neu.get("prompt") or text).strip()))
 
-    melden(f"Das Sprachmodell schreibt {len(fehlend)} Ansichten")
+    melden("Das Sprachmodell beschreibt den Gegenstand" if nur_gegenstand
+           else f"Das Sprachmodell schreibt {len(fehlend)} Ansichten")
     geschrieben = chat.seiten_plan(aus_baustein or text,
                                    params.get("modell") or None)
     # Der Baustein behaelt seinen eigenen Prompt -- gefragt war er nur nach
@@ -1092,7 +1140,25 @@ def run_sechsseiten(params: dict) -> None:
     """
     try:
         projekt = _projekt_des_laufs
-        plan = _gegenstandsplan(params, projekt)
+        if params.get("stufe") == "erstes":
+            return _erstes_bild(params, projekt)
+        # Gibt es schon ein erstes Bild, kommen die sechs Seiten in denselben
+        # Eintrag -- und der Gegenstand ist der, der darin zu sehen ist.
+        vorher = None
+        if params.get("eintrag"):
+            projekt = str(params.get("eintrag_projekt") or projekt)
+            vorher = sechsseiten.eintrag(projekt, str(params["eintrag"]))
+            if not vorher:
+                raise RuntimeError("Den Katalogeintrag gibt es nicht mehr")
+        fest = ""
+        if vorher:
+            # Steht oben im Feld noch derselbe Gegenstand -- oder gar keiner
+            # --, gilt der des ersten Bildes. Hat man ihn geaendert, gilt
+            # das Geaenderte.
+            oben = sechsseiten.lies_eingabe(params.get("text") or "")["allgemein"]
+            if not oben or oben.rstrip(". ") == (vorher.get("prompt") or "").rstrip(". "):
+                fest = vorher.get("prompt") or ""
+        plan = _gegenstandsplan(params, projekt, fest=fest)
         text, sichten = plan["text"], plan["sichten"]
         hintergrund = plan["hintergrund"]
         stil = str(params.get("stil") or "")
@@ -1124,17 +1190,26 @@ def run_sechsseiten(params: dict) -> None:
         # Der Eintrag steht in der Liste, bevor das erste Bild gerechnet ist.
         # Bricht der Lauf in der Mitte ab, ist damit sichtbar, was entstanden
         # ist und was fehlt.
-        eintrag = sechsseiten.anlegen(
-            projekt, str(params.get("name") or ""),
-            beschreibung=str(params.get("text") or ""),
-            prompt=text, stil=stil, seed=seed, sichten=sichten,
-            hintergrund=hintergrund, ohne=plan["ohne"])
+        if vorher:
+            # Derselbe Seed wie beim ersten Bild: dasselbe Ausgangsrauschen
+            # haelt Farbe und Anmutung naeher an dem, was man gesehen hat.
+            seed = int(vorher.get("seed") or seed)
+            eintrag = sechsseiten.nachtragen(
+                projekt, vorher["id"], prompt=text, stil=stil,
+                sichten=sichten, hintergrund=hintergrund, ohne=plan["ohne"])
+        else:
+            eintrag = sechsseiten.anlegen(
+                projekt, str(params.get("name") or ""),
+                beschreibung=str(params.get("text") or ""),
+                prompt=text, stil=stil, seed=seed, sichten=sichten,
+                hintergrund=hintergrund, ohne=plan["ohne"])
         current["seiten"] = {"id": eintrag["id"], "projekt": projekt,
                              "name": eintrag["name"], "prompt": text,
                              # Damit zu sehen ist, wie das Sprachmodell den
                              # Gegenstand von jeder Seite gelesen hat --
                              # daran liegt es, wenn eine Ansicht danebengeht.
-                             "sichten": sichten, "bilder": {}}
+                             "sichten": sichten,
+                             "bilder": dict(eintrag.get("bilder") or {})}
         melden("Die sechs Seiten werden gerechnet", 0, len(paare))
 
         def sammler(meta, image):
@@ -1167,7 +1242,8 @@ def run_sechsseiten(params: dict) -> None:
             prompts=[p for _, p in paare])
 
         melden("")
-        fertig = len(current["seiten"]["bilder"])
+        fertig = len([s for s in current["seiten"]["bilder"]
+                      if s in sechsseiten.SEITEN])
         engine.note("idle",
                     f"Katalogeintrag fertig: {fertig} von {len(paare)} Seiten"
                     if fertig else "abgebrochen")
@@ -1177,6 +1253,69 @@ def run_sechsseiten(params: dict) -> None:
         current["error"] = err.strip().splitlines()[-1]
         melden("")
         engine.note("idle", "Die sechs Seiten sind fehlgeschlagen")
+
+
+def _erstes_bild(params: dict, projekt: str) -> None:
+    """Die erste Stufe: der Gegenstand einmal, als Probe.
+
+    Legt den Katalogeintrag an. Die sechs Seiten kommen spaeter in denselben
+    Eintrag, mit demselben Gegenstandstext und demselben Seed.
+    """
+    plan = _gegenstandsplan(params, projekt, nur_gegenstand=True)
+    text, stil = plan["text"], str(params.get("stil") or "")
+    prompt = sechsseiten.erster_prompt(text, stil, plan["hintergrund"])
+    if not prompt:
+        raise RuntimeError("Aus der Beschreibung laesst sich kein Prompt bilden")
+    seed = int(params.get("seed") or 42)
+    eintrag = sechsseiten.anlegen(
+        projekt, str(params.get("name") or ""),
+        beschreibung=str(params.get("text") or ""), prompt=text, stil=stil,
+        seed=seed, hintergrund=plan["hintergrund"], ohne=plan["ohne"])
+    current["seiten"] = {"id": eintrag["id"], "projekt": projekt,
+                         "name": eintrag["name"], "prompt": text,
+                         "sichten": {}, "bilder": {}}
+    melden("Das erste Bild wird gerechnet", 0, 1)
+
+    def sammler(meta, image):
+        datei = sechsseiten.ablegen(projekt, eintrag["id"], sechsseiten.ERSTES,
+                                    image, prompt=prompt, seed=meta["seed"])
+        current["seiten"] = {**current["seiten"],
+                             "bilder": {sechsseiten.ERSTES: datei}}
+
+    engine.run_series(
+        **_series_kwargs(
+            {"base": int(params.get("base", 1024)),
+             "steps": int(params.get("steps", 30)),
+             "aspect": "1:1", "seed": seed, "lock_seed": True},
+            [], "t2i", sammler),
+        prompts=[prompt])
+    melden("")
+    engine.note("idle", "Erstes Bild fertig" if current["seiten"]["bilder"]
+                else "abgebrochen")
+
+
+def run_yolo(params: dict) -> None:
+    """Ein YOLO-Training. Laeuft als Auftrag, weil es die Karte fuer sich braucht."""
+    try:
+        engine._cancel = False
+        engine.aborted = False
+        erg = yolo.trainieren(
+            _projekt_des_laufs, str(params.get("modell") or "yolo11n"),
+            max(1, min(1000, int(params.get("epochen") or 50))),
+            int(params.get("bildgroesse") or 640),
+            max(0.05, min(0.5, float(params.get("val_anteil") or 0.2))),
+            melden, lambda: engine._cancel)
+        melden("")
+        current["yolo"] = erg
+        engine.note("idle", "YOLO abgebrochen" if engine.aborted else
+                    f"YOLO fertig: {erg['lauf']} · {erg['train']} Bilder Training, "
+                    f"{erg['val']} Validierung")
+    except Exception:
+        err = traceback.format_exc()
+        print(err, file=sys.stderr)
+        current["error"] = err.strip().splitlines()[-1]
+        melden("")
+        engine.note("error", current["error"])
 
 
 def run_demo(params: dict) -> None:

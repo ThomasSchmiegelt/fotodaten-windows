@@ -93,7 +93,15 @@ SEITEN = {
                "visible"),
 }
 
-DATEI = re.compile(r"(?:" + "|".join(SEITEN) + r")\.png")
+# Das erste Bild: der Gegenstand einmal, schraeg von vorn oben. Es kommt vor
+# den sechs Seiten, als Probe -- sechs Ansichten kosten zehn Minuten, und
+# ob der Gegenstand ueberhaupt so aussieht wie gedacht, zeigt schon eines.
+# Danach ist es die Vorlage fuer die Effekte: ein Cover, eine
+# Explosionszeichnung setzen auf einem Bild auf, und ein Schraegbild zeigt
+# mehr vom Gegenstand als jede einzelne der sechs Seiten.
+ERSTES = "erstes"
+
+DATEI = re.compile(r"(?:" + "|".join((*SEITEN, ERSTES)) + r")\.png")
 
 # Was fuer alle sechs Bilder gilt. Das Schweben steht zweimal drin -- einmal
 # als Lage, einmal als Aufzaehlung dessen, was nicht im Bild sein darf. Ein
@@ -121,7 +129,15 @@ def _grund(eigener: str) -> str:
     text = (eigener or "").strip().rstrip(". ")
     if not text:
         return GRUND
-    return f"{text} behind it, soft even light from all sides."
+    return f"{text[0].upper()}{text[1:]} behind it, soft even light from all sides."
+
+
+# Manche Stile bringen ihre eigene Kulisse mit: "Technisch" sagt "clean
+# studio backdrop", "Studio" "seamless backdrop". Gegen einen eigenen
+# Hintergrund gewinnt die Kulisse -- gemessen am Satelliten vor dem
+# Sternenhimmel, der mit Stil "Technisch" vor hellem Grau schwebte. Steht
+# ein eigener Hintergrund da, faellt dieser Teil des Stils weg.
+KULISSE = re.compile(r",[^,]*\b(?:backdrop|background)\b[^,]*", re.I)
 
 
 # --- Die Eingabemaske ----------------------------------------------------
@@ -238,11 +254,38 @@ def seiten_prompt(text: str, seite: str, stil: str = "",
     sichtbar = (sicht or "").strip().rstrip(".") or sichtbar
     if not beschreibung:
         return ""
-    return bausteine.mit_stil(
-        f"one single object seen {richtung}. "
+    return _abschluss(f"one single object seen {richtung}. "
+                      f"{bausteine._klein(beschreibung)}. "
+                      f"The picture shows {sichtbar}. {SCHWEBT}",
+                      stil, hintergrund)
+
+
+def erster_prompt(text: str, stil: str = "", hintergrund: str = "") -> str:
+    """Der Prompt fuers erste Bild: derselbe Gegenstand, schraeg gesehen.
+
+    Gleich gebaut wie die sechs Seiten -- schwebend, derselbe Hintergrund,
+    derselbe Stil --, nur die Blickrichtung ist eine, die viel zeigt.
+    """
+    beschreibung = (text or "").strip().rstrip(".")
+    if not beschreibung:
+        return ""
+    return _abschluss(
+        "one single object seen at a three-quarter angle from the front and "
+        "slightly above. "
         f"{bausteine._klein(beschreibung)}. "
-        f"The picture shows {sichtbar}. {SCHWEBT} {_grund(hintergrund)}",
-        stil)
+        "The picture shows its front, one of its sides and its top at the "
+        f"same time. {SCHWEBT}", stil, hintergrund)
+
+
+def _abschluss(kern: str, stil: str, hintergrund: str) -> str:
+    """Stil und Hintergrund an einen Prompt haengen."""
+    # Der Hintergrund steht hinter dem Stil, als letzter Satz: dazwischen
+    # geschoben las ihn das Modell als Nebensache.
+    mit = bausteine.mit_stil(kern, stil)
+    if (hintergrund or "").strip():
+        rumpf = kern.rstrip(".")
+        mit = rumpf + KULISSE.sub("", mit[len(rumpf):])
+    return f"{mit.rstrip('.')}. {_grund(hintergrund)}"
 
 
 def alle_prompts(text: str, stil: str = "", sichten: dict | None = None,
@@ -342,7 +385,8 @@ def ablegen(projekt: str, kennung: str, seite: str, bild, prompt: str = "",
     in `outputs/` -- ohne ihn weiss spaeter niemand mehr, wie die Ansicht
     entstanden ist.
     """
-    if seite not in SEITEN or not KENNUNG.fullmatch(kennung or ""):
+    if (seite not in SEITEN and seite != ERSTES) \
+            or not KENNUNG.fullmatch(kennung or ""):
         return ""
     name = f"{seite}.png"
     info = PngImagePlugin.PngInfo()
@@ -362,6 +406,28 @@ def ablegen(projekt: str, kennung: str, seite: str, bild, prompt: str = "",
             _schreiben(projekt, daten)
             break
     return name
+
+
+def eintrag(projekt: str, kennung: str) -> dict | None:
+    """Ein Eintrag nach seiner Kennung -- oder None."""
+    if not projekte.SCHLUESSEL.fullmatch(projekt or "") \
+            or not KENNUNG.fullmatch(kennung or ""):
+        return None
+    return next((e for e in liste(projekt) if e.get("id") == kennung), None)
+
+
+def nachtragen(projekt: str, kennung: str, **felder) -> dict | None:
+    """Felder eines Eintrags ersetzen, etwa die Ansichten nach dem ersten Bild.
+
+    Die Bilder bleiben, wie sie sind -- die traegt `ablegen` ein.
+    """
+    daten = liste(projekt)
+    for e in daten:
+        if e.get("id") == kennung:
+            e.update({k: v for k, v in felder.items() if k != "bilder"})
+            _schreiben(projekt, daten)
+            return e
+    return None
 
 
 def bildpfad(projekt: str, kennung: str, name: str) -> str | None:

@@ -9,13 +9,11 @@ import json
 import os
 import re
 import sys
-import urllib.error
-import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from kataloge import CAMERAS, EFFECTS, FORMS, LIGHTS, STYLES, VIEWS, overrides  # noqa: E402
 
-from .ollama import MODEL, OLLAMA, THINK, antwort  # noqa: E402
+from .ollama import MODEL, _json, antwort, rufen  # noqa: E402
 
 ASPECTS = ["1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16"]
 RESOLUTIONS = [1024, 1536, 2048]
@@ -124,22 +122,11 @@ def ask(text: str, has_images: int = 0, model: str | None = None,
             {"role": "user", "content": text},
         ],
     }
-    request = urllib.request.Request(
-        OLLAMA.rstrip("/") + "/api/chat", json.dumps(body).encode("utf-8"),
-        {"Content-Type": "application/json"})
+    # Ueber rufen(): dort entscheidet sich, ob Ollama oder die Cloud
+    # antwortet, und die Fehler kommen schon als Klartext.
+    answer = rufen(body, timeout=180)
     try:
-        with urllib.request.urlopen(request, timeout=180) as response:
-            answer = json.load(response)["message"]["content"]
-    except urllib.error.HTTPError as error:
-        detail = error.read().decode("utf-8", "replace")[:200]
-        raise RuntimeError(f"Ollama meldet {error.code}: {detail}")
-    except urllib.error.URLError as error:
-        raise RuntimeError(
-            f"Kein Kontakt zu Ollama unter {OLLAMA} ({error.reason}). "
-            "Laeuft der Dienst?")
-
-    try:
-        return json.loads(THINK.sub("", answer).strip())
+        return _json(answer)
     except json.JSONDecodeError:
         raise RuntimeError("Das Sprachmodell hat kein verwertbares JSON geliefert.")
 
