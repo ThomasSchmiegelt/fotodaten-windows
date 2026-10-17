@@ -43,6 +43,7 @@ import cloud  # noqa: E402
 import datensatz  # noqa: E402
 import detektor  # noqa: E402
 import sechsseiten  # noqa: E402
+import retusche  # noqa: E402
 from kataloge import (  # noqa: E402
     AXIS_OFF, EFFECTS, EINSTELLUNGEN, FOLGEN, GEZEICHNET, GROUP_ACTIONS,
     MIMIK, PAINT_TARGET, WESEN,
@@ -349,6 +350,8 @@ class Handler(BaseHTTPRequestHandler):
                  "erzeugt": ablauf.zu_erzeugen(v["bauen"]("auto", None)),
                  "bloecke": v["bauen"]("auto", None)}
                 for k, v in ablauf.ABLAEUFE.items()]
+            info["retusche"] = [{"key": k, "label": v[0], "text": v[1]}
+                                for k, v in retusche.VORLAGEN.items()]
             return self._json(200, info)
 
         if path == "/api/bewertung":
@@ -1241,6 +1244,33 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": f"ungueltiges JSON: {exc}"})
             auftrag = einreihen("demo", params)
             return self._json(202, {"ok": True, "nummer": auftrag["nummer"]})
+
+        if path == "/api/retusche":
+            # Eine Stelle nachbessern: Bild aus der Galerie (per Name) oder
+            # hochgeladen, dazu die gemalte Maske. Geprueft wird hier, damit
+            # ein leerer Pinselstrich nicht erst in der Warteschlange scheitert.
+            params = self._body()
+            if params is None:
+                return self._json(400, {"error": "ungueltiges JSON"})
+            if params.get("datei"):
+                pfad = self._output_path(os.path.basename(str(params["datei"])))
+                if not pfad:
+                    return self._json(404, {"error": "Bild nicht gefunden"})
+                params["pfad"] = pfad
+            elif not params.get("bild"):
+                return self._json(400, {"error": "Kein Bild gewählt"})
+            if not params.get("maske"):
+                return self._json(400, {"error": "Bitte die Stelle mit dem Pinsel markieren"})
+            try:
+                gemalt = decode(params["maske"])
+                if not retusche.maske_lesen(gemalt, gemalt.size).getbbox():
+                    return self._json(400, {"error": "Bitte die Stelle mit dem Pinsel markieren"})
+            except Exception as exc:
+                return self._json(400, {"error": f"Maske nicht lesbar: {exc}"})
+            if not str(params.get("prompt") or "").strip():
+                return self._json(400, {"error": "Bitte sagen, was an der Stelle anders werden soll"})
+            nummer = einreihen("retusche", params)["nummer"]
+            return self._json(202, {"ok": True, "nummer": nummer})
 
         if path == "/api/chat":
             # Mit Gedaechtnis: der Verlauf liegt beim Server, damit ein

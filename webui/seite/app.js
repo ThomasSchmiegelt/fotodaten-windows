@@ -25,6 +25,7 @@ const MODES = {
   seiten: {label: "Sechs Seiten erzeugen", refs: 0, ph: "", hint: () => ""},
   datensatz: {label: "Liste neu laden", refs: 0, ph: "", hint: () => ""},
   training: {label: "Detektor trainieren", refs: 0, ph: "", hint: () => ""},
+  retusche: {label: "Retuschieren", refs: 0, ph: "", hint: () => ""},
   varianten: {label: "Varianten erzeugen", refs: 1, sweep: "varianten", count: 12,
               follow: true, lock: false,
               ph: "(optional) zusätzliche Angaben, die für jede Variante gelten",
@@ -44,6 +45,7 @@ fetch("/api/info").then(r => r.json()).then(info => {
     .map(a => `<option>${a}</option>`).join("");
   maxRefs = info.max_references;
   templates = info.templates;
+  retVorlagenFuellen(info.retusche);
   refBudget = info.reference_token_budget;
   Object.assign(SWEEP_LEN, {view: info.views.length, style: info.styles.length,
                             light: info.lights.length, camera: info.cameras.length});
@@ -290,12 +292,15 @@ function setMode(next) {
   const istTraining = next === "training";
   $("trainingTabBox").style.display = istTraining ? "block" : "none";
   if (istTraining) detHolen();
+  const istRetusche = next === "retusche";
+  $("retuscheBox").style.display = istRetusche ? "block" : "none";
   $("szenenBox").style.display = istSzenen ? "block" : "none";
   $("geschichteBox").style.display = istGeschichte ? "block" : "none";
   // Beide Reiter haben eine eigene Bedienung und brauchen die ueblichen
   // Kaesten nicht -- Prompt, Darstellung, Bildgroesse.
   const eigen = istDemo || istBausteine || istSzenen || istGeschichte
-                || istKatalog || istSeiten || istDatensatz || istTraining;
+                || istKatalog || istSeiten || istDatensatz || istTraining
+                || istRetusche;
   eigenerReiter = eigen;
   $("demoBox").style.display = istDemo ? "block" : "none";
   $("bausteinBox").style.display = istBausteine ? "block" : "none";
@@ -312,6 +317,9 @@ function setMode(next) {
   if (!eigen) { $("boxVorlage").style.display = ""; $("boxDarstellung").style.display = "";
                 $("boxBild").style.display = ""; $("boxFein").style.display = "";
                 $("boxTraining").style.display = ""; }
+  // Die Retusche hat ihren eigenen Prompt, braucht aber Schritte und den
+  // negativen Prompt aus der Feineinstellung.
+  if (istRetusche) $("boxFein").style.display = "";
   demoDauer();
   const istVarianten = next === "varianten";
   $("gruppeBox").style.display = next === "gruppe" ? "block" : "none";
@@ -921,6 +929,7 @@ $("go").onclick = () => {
   if (mode === "seiten") return seitenStarten();
   if (mode === "datensatz") return datensatzHolen();
   if (mode === "training") return detStarten();
+  if (mode === "retusche") return retStarten();
   start();
 };
 $("stop").onclick = () => {
@@ -4072,6 +4081,7 @@ async function show(file) {
     `<div><a href="/outputs/${file}" download>${esc(file)}</a>`
     + (m.size ? ` · ${m.size[0]} × ${m.size[1]} px` : "")
     + (m.seed ? ` · Seed ${esc(m.seed)}` : "")
+    + ` · <a href="#" onclick="retuschieren('${file}');return false" title="Eine Stelle nachbessern">Retuschieren</a>`
     + (hasGimp ? ` · <a href="#" onclick="openInGimp('${file}');return false">In GIMP öffnen</a>` : "")
     + `</div>`
     + (tags ? `<div class="tags">${tags}</div>` : "")
@@ -4091,6 +4101,172 @@ async function openInGimp(file) {
     return say(err.error || "GIMP ließ sich nicht starten.", "err");
   }
   say("In GIMP geöffnet. Der erste Start dauert einen Moment.", "ok");
+}
+
+// ---------- Retusche ----------
+// Gemalt wird auf einer Leinwand in der vollen Bildgroesse, die per CSS auf
+// die Anzeige verkleinert ist -- die Maske passt so Pixel fuer Pixel zum
+// Bild, egal wie breit die Spalte gerade ist. Der Server liest nur den
+// Alphakanal.
+let retDateiName = "", retDaten = "", retVerlauf = [], retMalt = false, retLetzter = null;
+const RET_MINDESTENS = 384, RET_VERLAUF = 12;
+
+function retVorlagenFuellen(liste) {
+  $("retVorlagen").innerHTML = (liste || []).map((v, i) =>
+    `<a href="#" data-i="${i}" title="${esc(v.text)}">${esc(v.label)}</a>`).join(" · ");
+  $("retVorlagen").querySelectorAll("a").forEach(a => a.onclick = e => {
+    e.preventDefault();
+    const text = liste[+a.dataset.i].text, feld = $("retPrompt");
+    feld.value = feld.value.trim() ? feld.value.trim() + " " + text : text;
+  });
+}
+
+// Aus der grossen Anzeige: genau dieses Bild, als neue Vorlage.
+function retuschieren(file) {
+  retDaten = "";
+  retLaden("/outputs/" + file, file);
+  setMode("retusche");
+}
+
+function retLaden(src, datei) {
+  retDateiName = datei || "";
+  const img = $("retBild");
+  img.onload = () => {
+    const c = $("retMaske");
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    retVerlauf = [];
+    $("retFlaeche").style.display = "block";
+    $("retQuelle").textContent = (datei ? datei : "Hochgeladenes Bild")
+      + ` · ${img.naturalWidth} × ${img.naturalHeight} px · die Stelle übermalen:`;
+    retRahmenZeigen();
+  };
+  img.src = src;
+}
+
+$("retDatei").onchange = e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const r = new FileReader();
+  r.onload = () => { retDaten = r.result; retLaden(r.result, ""); };
+  r.readAsDataURL(f);
+};
+
+function retPunkt(e) {
+  const c = $("retMaske"), r = c.getBoundingClientRect(), s = c.width / r.width;
+  return [(e.clientX - r.left) * s, (e.clientY - r.top) * s, s];
+}
+
+function retStrich(e) {
+  const [x, y, s] = retPunkt(e), ctx = $("retMaske").getContext("2d");
+  ctx.globalCompositeOperation = $("retRadierer").checked ? "destination-out" : "source-over";
+  ctx.strokeStyle = ctx.fillStyle = "#ff3b30";
+  ctx.lineWidth = $("retPinsel").value * s;
+  ctx.lineCap = ctx.lineJoin = "round";
+  ctx.beginPath();
+  if (retLetzter) { ctx.moveTo(...retLetzter); ctx.lineTo(x, y); ctx.stroke(); }
+  else { ctx.arc(x, y, ctx.lineWidth / 2, 0, 2 * Math.PI); ctx.fill(); }
+  retLetzter = [x, y];
+}
+
+(() => {
+  const c = $("retMaske");
+  c.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    c.setPointerCapture(e.pointerId);
+    retVerlauf.push(c.getContext("2d").getImageData(0, 0, c.width, c.height));
+    if (retVerlauf.length > RET_VERLAUF) retVerlauf.shift();
+    retMalt = true;
+    retLetzter = null;
+    retStrich(e);
+  });
+  c.addEventListener("pointermove", e => { if (retMalt) retStrich(e); });
+  const ende = () => { if (!retMalt) return; retMalt = false; retRahmenZeigen(); };
+  c.addEventListener("pointerup", ende);
+  c.addEventListener("pointercancel", ende);
+})();
+
+function retZurueck() {
+  const alt = retVerlauf.pop();
+  if (!alt) return;
+  $("retMaske").getContext("2d").putImageData(alt, 0, 0);
+  retRahmenZeigen();
+}
+$("retZurueck").onclick = e => { e.preventDefault(); retZurueck(); };
+$("retLeeren").onclick = e => {
+  e.preventDefault();
+  const c = $("retMaske"), ctx = c.getContext("2d");
+  retVerlauf.push(ctx.getImageData(0, 0, c.width, c.height));
+  ctx.clearRect(0, 0, c.width, c.height);
+  retRahmenZeigen();
+};
+document.addEventListener("keydown", e => {
+  if (mode !== "retusche" || !(e.ctrlKey || e.metaKey) || e.key !== "z") return;
+  if (["TEXTAREA", "INPUT"].includes(document.activeElement.tagName)) return;
+  e.preventDefault();
+  retZurueck();
+});
+$("retPinsel").addEventListener("input",
+  () => $("retPinselZahl").textContent = $("retPinsel").value + " px");
+
+// Derselbe Ausschnitt wie retusche.ausschnitt() im Server -- gestrichelt
+// gezeigt, damit man sieht, wie viel Umgebung das Modell bekommt.
+function retAusschnitt() {
+  const c = $("retMaske");
+  if (!c.width) return null;
+  const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+  let l = c.width, o = c.height, r = -1, u = -1;
+  for (let y = 0; y < c.height; y++)
+    for (let x = 0; x < c.width; x++)
+      if (d[(y * c.width + x) * 4 + 3] > 20) {
+        if (x < l) l = x; if (x > r) r = x; if (y < o) o = y; if (y > u) u = y;
+      }
+  if (r < 0) return null;
+  r += 1; u += 1;
+  const rand = parseFloat($("retRand").value);
+  const seite = Math.floor(Math.max(Math.max(r - l, u - o) * (1 + 2 * rand), RET_MINDESTENS));
+  const sw = Math.min(seite, c.width), sh = Math.min(seite, c.height);
+  const x0 = Math.round(Math.min(Math.max((l + r) / 2 - sw / 2, 0), c.width - sw));
+  const y0 = Math.round(Math.min(Math.max((o + u) / 2 - sh / 2, 0), c.height - sh));
+  return [x0, y0, sw, sh];
+}
+function retRahmenZeigen() {
+  const box = retAusschnitt(), el = $("retRahmen"), c = $("retMaske");
+  if (!box) { el.style.display = "none"; return; }
+  const [x, y, w, h] = box;
+  Object.assign(el.style, {display: "block",
+    left: 100 * x / c.width + "%", top: 100 * y / c.height + "%",
+    width: 100 * w / c.width + "%", height: 100 * h / c.height + "%"});
+}
+$("retRand").addEventListener("input", retRahmenZeigen);
+
+async function retStarten() {
+  if ($("retFlaeche").style.display === "none")
+    return say("Erst ein Bild wählen — unter dem großen Bild auf „Retuschieren“.", "err");
+  if (!retAusschnitt()) return say("Bitte die Stelle mit dem Pinsel markieren.", "err");
+  const prompt = $("retPrompt").value.trim();
+  if (!prompt) return say("Bitte sagen, was an der Stelle anders werden soll.", "err");
+  buttonState("busy");
+  const res = await fetch("/api/retusche", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      datei: retDateiName || undefined, bild: retDateiName ? undefined : retDaten,
+      maske: $("retMaske").toDataURL("image/png"), prompt,
+      count: parseInt($("retAnzahl").value, 10) || 1,
+      kante: parseInt($("retKante").value, 10) || 0,
+      rand: parseFloat($("retRand").value),
+      steps: parseInt($("steps").value, 10),
+      true_cfg_scale: parseFloat($("cfg").value),
+      negative_prompt: $("negative").value, streng: $("streng").checked,
+      seed: Math.floor(Math.random() * 2 ** 31)})
+  }).catch(() => null);
+  if (!res || !res.ok) {
+    const err = res ? await res.json().catch(() => ({})) : {};
+    buttonState("idle");
+    return say(err.error || "Der Server antwortet nicht.", "err");
+  }
+  say("Die Retusche wird gerechnet …", "ok");
+  poll();
 }
 
 // ---------- Video aus ausgewaehlten Bildern ----------

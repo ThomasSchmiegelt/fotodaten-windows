@@ -40,6 +40,7 @@ import szenenbau  # noqa: E402
 import datensatz  # noqa: E402
 import detektor  # noqa: E402
 import sechsseiten  # noqa: E402
+import retusche  # noqa: E402
 from torwache import torwaechter  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -117,6 +118,9 @@ def _titel(art: str, params: dict) -> str:
         was = (params.get("name") or params.get("text") or "").strip()
         art = "Erstes Bild" if params.get("stufe") == "erstes" else "Sechs Seiten"
         return f"{art}: {was[:44]}" if was else art
+    if art == "retusche":
+        text = (params.get("prompt") or "").strip()
+        return f"Retusche: {text[:48]}" if text else "Retusche"
     if art == "detektor":
         return f"Detektor trainieren: {params.get('modell') or 'dfine-nano'}, {params.get('epochen') or 50} Epochen"
     if art == "demo":
@@ -291,7 +295,8 @@ def _abarbeiten(auftrag: dict, weitere: list[dict] | None = None) -> None:
                       "expose": run_expose, "ergaenzen": run_ergaenzen,
                       "aufbau": run_aufbau, "prosa": run_prosa,
                       "szenenbau": run_szenenbau,
-                      "sechsseiten": run_sechsseiten, "detektor": run_detektor}
+                      "sechsseiten": run_sechsseiten, "detektor": run_detektor,
+                      "retusche": run_retusche}
             laeufe.get(auftrag["art"], run_job)(auftrag["params"])
         else:
             # Ein Ladevorgang fuer alle: die fertigen Prompts gehen als Liste
@@ -370,7 +375,8 @@ def _save(meta: dict, image: Image.Image, stamp: str, kind: str,
     info = PngImagePlugin.PngInfo()
     for key in ("prompt", "seed", "view", "style", "light", "camera", "effect",
                 "form", "paint", "palette", "scene", "angle", "device",
-                "scenario", "material", "haltung", "kleidung"):
+                "scenario", "material", "haltung", "kleidung", "retusche",
+                "quelle"):
         if meta.get(key) is not None:
             info.add_text(f"qwen_{key}", str(meta[key]))
     image.save(os.path.join(ziel(), name), pnginfo=info)
@@ -554,6 +560,63 @@ def run_job(params: dict) -> None:
         current["error"] = err.strip().splitlines()[-1]
         engine.note("error", current["error"])
     # Die Sperre haelt und loest der Arbeiter -- siehe _abarbeiten().
+
+
+def run_retusche(params: dict) -> None:
+    """Eine gemalte Stelle nachbessern -- siehe retusche.py.
+
+    Mehrere Versuche laufen mit aufsteigendem Seed in einem Ladevorgang: wie
+    ein Mund geraet, ist Glueckssache, und aussuchen geht schneller als
+    viermal neu starten.
+    """
+    try:
+        original = Image.open(params["pfad"]) if params.get("pfad") \
+            else decode(params["bild"])
+        original.load()
+        if original.mode not in ("RGB", "RGBA"):
+            original = original.convert("RGBA" if "transparency" in original.info
+                                        else "RGB")
+        maske = retusche.maske_lesen(decode(params["maske"]), original.size)
+        box = retusche.ausschnitt(maske, float(params.get("rand", 0.6)))
+        if not box:
+            raise ValueError("Keine Stelle markiert")
+
+        current["translated"] = _translate_inputs(params)
+        text = retusche.anweisung(params.get("prompt", ""))
+        anzahl = max(1, min(int(params.get("count", 1) or 1), 8))
+        seed = int(params.get("seed", 42))
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        kante = int(params.get("kante", 16))
+        # Der Prompt des Originals bleibt am Bild: wer es spaeter benennt
+        # oder in einer Szene aufruft, meint das Bild, nicht die Retusche.
+        try:
+            frueher = str(original.text.get("qwen_prompt") or "")
+        except AttributeError:
+            frueher = ""
+
+        def on_image(meta, image):
+            fertig = retusche.einsetzen(original, image, maske, box, kante)
+            name = _save({"index": meta["index"], "seed": meta["seed"],
+                          "prompt": frueher or None, "retusche": text,
+                          "quelle": params.get("datei") or None},
+                         fertig, stamp, "retusche")
+            current["files"].append(name)
+
+        engine.run_series(
+            prompt=text, negative_prompt=params.get("negative_prompt", ""),
+            images=[original.convert("RGB").crop(box)], mode="edit",
+            base=int(params.get("base", 1024)), follow_reference=True,
+            steps=int(params.get("steps", 40)), seed=seed,
+            true_cfg_scale=_cfg_fuer(params),
+            prompts=[text] * anzahl, seeds=[seed + i for i in range(anzahl)],
+            on_image=on_image)
+        done = len(current["files"])
+        engine.note("idle", f"fertig: {done} Retusche(n)" if done else "abgebrochen")
+    except Exception:
+        err = traceback.format_exc()
+        print(err, file=sys.stderr)
+        current["error"] = err.strip().splitlines()[-1]
+        engine.note("error", current["error"])
 
 
 def run_expose(params: dict) -> None:

@@ -9,7 +9,7 @@ der [README](README.md).
 1. [Starten und beenden](#1-starten-und-beenden)
 2. [Die Oberfläche auf einen Blick](#2-die-oberfläche-auf-einen-blick)
 3. [Das erste Bild: Text → Bild](#3-das-erste-bild-text--bild)
-4. [Bilder bearbeiten und Effekte](#4-bilder-bearbeiten-und-effekte)
+4. [Bilder bearbeiten, Effekte, Retusche](#4-bilder-bearbeiten-effekte-retusche)
 5. [Gruppe und Rundum](#5-gruppe-und-rundum)
 6. [Varianten](#6-varianten)
 7. [Trainingsdaten und eigener Detektor — die ganze Kette](#7-trainingsdaten-und-eigener-detektor--die-ganze-kette)
@@ -69,6 +69,7 @@ nächsten Auftrags.
 | Gruppe | mehrere Personen in ein Bild |
 | Rundum | eine Person von allen Seiten |
 | Varianten | ein Basisbild vielfach abwandeln — etwa für Trainingsdaten |
+| Retusche | eine Stelle nachbessern: Fleck, schiefes Lächeln, Hand |
 | Ablauf | eine Bildfolge mit Video |
 | Bausteine | Personen, Orte, Gegenstände zum Wiederverwenden |
 | Szenen | Bausteine zu einem Bild zusammenstellen |
@@ -132,7 +133,7 @@ passend ein.
 
 ---
 
-## 4. Bilder bearbeiten und Effekte
+## 4. Bilder bearbeiten, Effekte, Retusche
 
 1. Reiter **Bearbeiten**, unter **Referenzbilder** 1–4 Bilder hochladen.
 2. Im Prompt sagen, **was sich ändern soll** („die Jacke rot“, „bei Nacht“).
@@ -168,6 +169,40 @@ in **Text→Bild** benutzen — Gegenstand in den Prompt, Effekt wählen. Beim C
 werden Farbwörter („gold“, „blau“) automatisch aus dem Prompt genommen, sonst
 bleibt das Modell farbig. Aus dem Reiter **Sechs Seiten** heraus geschieht
 das mit einem Klick (Stufe 4).
+
+### Retusche: eine Stelle nachbessern
+
+Ein roter Fleck unter der Nase, ein schiefes Lächeln, eine Hand mit sechs
+Fingern: dafür ist der Reiter **Retusche** da. Das ganze Bild noch einmal
+bearbeiten lassen hilft hier selten, denn das Modell kennt keine Maske und
+zeichnet dabei alles neu, auch das Gesicht. Und das Prompt-Feld allein
+reicht nicht: „Fleck entfernen“ verstehen die Modelle, doch je kleiner das
+Gesicht im Bild ist, desto ungenauer arbeiten sie dort.
+
+1. Unter dem großen Bild auf **Retuschieren** klicken (oder im Reiter ein
+   Bild hochladen).
+2. Die Stelle **mit dem Pinsel übermalen**. Radierer, „Strich zurück“
+   (Strg+Z) und „Maske leeren“ stehen darunter.
+3. Sagen, was dort anders sein soll, oder eine Schnellwahl anklicken:
+   *Haut glätten, Fleck weg* · *Lächeln gerade* · *Augen klar* ·
+   *Hand richtig* · *Gegenstand entfernen*.
+4. **Retuschieren.**
+
+Was dabei geschieht: Um die Maske wird ein Ausschnitt gelegt (gestrichelt
+angezeigt), und nur dieser geht ins Modell, in voller Auflösung. Ein Mund,
+der im Ganzkörperbild 80 Pixel breit ist, bekommt so rund tausend. Das
+Ergebnis wird zurückverkleinert, in der Farbe angeglichen und nur innerhalb
+der Maske mit weicher Kante eingesetzt. Alles außerhalb bleibt pixelgenau.
+
+- **Versuche**: mehrere Seeds in einem Ladevorgang, den besten aussuchen.
+- **Umgebung**: eng gibt der Stelle mehr Auflösung, weit dem Modell mehr
+  Zusammenhang. Für ein Lächeln das ganze Gesicht in den Ausschnitt nehmen.
+- **Weiche Kante**: sieht man eine Naht, den Wert erhöhen.
+- **Schritte** und **Negativ-Prompt** kommen aus der Feineinstellung
+  darunter, wie bei den anderen Reitern.
+- Das Ergebnis heißt `…_retusche_…png`. Das Original bleibt erhalten und
+  steht in den Bilddaten unter `qwen_quelle`. Wer weiter verbessern will,
+  klickt beim Ergebnis wieder auf **Retuschieren**.
 
 ---
 
@@ -491,6 +526,8 @@ gewünschten Reihenfolge wählen, Gesamtdauer eintragen.
 **Auswahl in GIMP wird zur Maske**: die Änderung wirkt nur dort. Unter jedem
 Bild in der Weboberfläche öffnet **In GIMP öffnen** genau dieses Bild (nur am
 Rechner des Servers).
+Für eine einzelne Stelle ist meist der Reiter **Retusche** bequemer
+(Abschnitt 4): Er rechnet den Ausschnitt in voller Auflösung.
 
 ---
 
@@ -572,6 +609,13 @@ erkannt und nicht übersetzt; außerdem brachten manche Stile ihre eigene
 Kulisse mit. Beides ist behoben. Hilft es dennoch nicht: den Hintergrund
 ausführlicher beschreiben („ein tiefschwarzer Sternenhimmel mit feinen
 Sternen“).
+
+**Retusche: Naht, Farbfleck oder falsches Gesicht**
+Eine sichtbare Kante: **Weiche Kante** erhöhen oder die Stelle großzügiger
+übermalen. Passt das Ergebnis nicht zum Rest (ein fremder Mund, eine andere
+Haut): **Umgebung** weiter stellen, damit das Modell mehr vom Gesicht sieht.
+Wirkt die Änderung zu schwach: die Anweisung deutlicher fassen und mehr
+**Versuche** laufen lassen.
 
 **Explosionszeichnung oder CAD sieht aus wie das Foto**
 Im Reiter Bearbeiten wirken beide nicht. In **Text→Bild** benutzen (siehe

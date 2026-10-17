@@ -91,6 +91,12 @@ Gruppe · Umrundung (eine Person aus wechselnden Blickwinkeln) · Varianten.
 Dazu eigene Reiter für Abläufe, Bausteine, Szenen, Geschichten, den Katalog
 und die **Sechs-Seiten-Ansicht** eines Gegenstands.
 
+**Retusche** bessert eine gemalte Stelle nach, etwa einen Fleck oder ein
+schiefes Lächeln. Weil das Modell keinen Masken-Eingang hat, geht nur ein
+Ausschnitt um die Maske ins Modell, in voller Auflösung. Das Ergebnis wird
+farblich angeglichen und mit weicher Kante nur innerhalb der Maske
+eingesetzt; der Rest bleibt pixelgenau (`webui/retusche.py`).
+
 **Gruppe** kennt drei Aufgaben: *aus Einzelbildern zusammenstellen* (je ein
 Bild pro Person), *Person ergänzen* (erstes Bild ist das Gruppenfoto, danach
 je ein Bild pro Person, die dazu soll) und *Person entfernen* (beschreiben,
@@ -644,6 +650,7 @@ webui/sprache/        Ollama: deuten.py (Freitext), uebersetzen.py,
 webui/szenenbau.py    eine Szene in Stufen: Kulisse, Posen, Zusammensetzen
 webui/sechsseiten.py  sechs Ansichten eines Gegenstands und ihr Katalog
 webui/cover.py        die Eingabemaske fuer ein Titelblatt
+webui/retusche.py     Ausschnitt um eine Maske, Farbangleich, Einsetzen
 webui/cloud.py        Sprach- und Bildmodell ueber eine OpenAI-kompatible API
 webui/datensatz.py    Bounding Boxes (Qwen3-VL + Grounding DINO), YOLO/COCO
 webui/detektor.py     Detektor-Training (D-FINE): Aufteilung, Laeufe, Ausprobieren

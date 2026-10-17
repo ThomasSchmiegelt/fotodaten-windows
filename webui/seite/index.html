@@ -100,6 +100,7 @@
       <button id="tab-gruppe">Gruppe</button>
       <button id="tab-person">Rundum</button>
       <button id="tab-varianten">Varianten</button>
+      <button id="tab-retusche">Retusche</button>
       <button id="tab-demo">Ablauf</button>
       <button id="tab-bausteine">Bausteine</button>
       <button id="tab-szenen">Szenen</button>
@@ -450,6 +451,63 @@
         <a href="#" id="gsUebernehmen">In den Ablauf übernehmen</a>
         — dort gegenlesen und starten · oder
         <a href="#" id="gsSofort">Bilder und Video jetzt erzeugen</a></p>
+    </fieldset>
+
+    <fieldset id="retuscheBox" style="display:none">
+      <legend>Retusche</legend>
+      <p class="hint">Eine Stelle nachbessern — ein Fleck, ein schiefes
+        Lächeln, eine Hand. <b>Mit dem Pinsel übermalen</b>, sagen was dort
+        anders sein soll, losschicken. Nur ein Ausschnitt um die Stelle geht
+        ins Modell, in voller Auflösung; der Rest des Bildes bleibt
+        pixelgenau. Das Original bleibt erhalten.</p>
+      <p class="hint" id="retQuelle">Noch kein Bild — unter dem großen Bild
+        rechts auf <b>Retuschieren</b> klicken, oder hier eines hochladen:</p>
+      <input type="file" id="retDatei" accept="image/*">
+
+      <div id="retFlaeche" style="display:none">
+        <div class="retbuehne" id="retBuehne">
+          <img id="retBild" alt="Bild zum Retuschieren">
+          <canvas id="retMaske"></canvas>
+          <div id="retRahmen"></div>
+        </div>
+        <div class="regler">
+          <span>Pinsel</span>
+          <input type="range" id="retPinsel" min="4" max="200" value="40">
+          <span id="retPinselZahl">40 px</span>
+        </div>
+        <p class="hint">
+          <label class="mithaken" style="display:inline-flex"><input type="checkbox" id="retRadierer"> Radierer</label>
+          · <a href="#" id="retZurueck" title="Strg+Z">Strich zurück</a>
+          · <a href="#" id="retLeeren">Maske leeren</a>
+          · Gestrichelt: der Ausschnitt, den das Modell sieht.</p>
+      </div>
+
+      <label for="retPrompt">Was soll an der Stelle anders werden?</label>
+      <div class="retvorlagen" id="retVorlagen"></div>
+      <textarea id="retPrompt" rows="3"
+        placeholder="z. B. den roten Fleck unter der Nase entfernen, Haut gleichmäßig"></textarea>
+
+      <div class="axis">
+        <div>
+          <label for="retAnzahl">Versuche</label>
+          <input type="number" id="retAnzahl" min="1" max="8" value="3">
+        </div>
+        <div>
+          <label for="retKante">Weiche Kante (px)</label>
+          <input type="number" id="retKante" min="0" max="80" value="16">
+        </div>
+      </div>
+      <label for="retRand">Umgebung im Ausschnitt</label>
+      <div class="regler">
+        <span>eng</span>
+        <input type="range" id="retRand" min="0.2" max="2" step="0.1" value="0.6">
+        <span>weit</span>
+      </div>
+      <p class="hint">Eng heißt mehr Auflösung für die Stelle; weit gibt dem
+        Modell mehr Zusammenhang — bei einem Lächeln lieber das ganze
+        Gesicht. Mehrere Versuche laufen mit verschiedenem Seed, du suchst
+        dir den besten aus. Schritte und Negativ-Prompt kommen aus der
+        <b>Feineinstellung</b> unten.</p>
     </fieldset>
 
     <fieldset id="trainingTabBox" style="display:none">

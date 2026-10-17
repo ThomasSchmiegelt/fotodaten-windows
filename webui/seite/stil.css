@@ -583,3 +583,14 @@
 .detkurve polyline.k5095 { stroke: #ffb347; }
 .detkurve text.k50 { fill: #4ea1ff; }
 .detkurve text.k5095 { fill: #ffb347; }
+
+/* Retusche: das Bild mit der Malschicht darueber. Die Leinwand hat die volle
+   Bildgroesse und wird hier nur verkleinert gezeigt. */
+.retbuehne { position: relative; margin: 8px 0; touch-action: none;
+             border-radius: 6px; overflow: hidden; background: var(--sunk); }
+.retbuehne img { display: block; width: 100%; height: auto; }
+.retbuehne canvas { position: absolute; inset: 0; width: 100%; height: 100%;
+                    opacity: .5; cursor: crosshair; }
+#retRahmen { position: absolute; display: none; pointer-events: none;
+             border: 1.5px dashed #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.5); }
+.retvorlagen { font-size: 12px; margin: 2px 0 6px; }
