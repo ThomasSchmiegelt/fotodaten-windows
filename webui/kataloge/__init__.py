@@ -14,6 +14,7 @@ from .anmutung import (
     HALTUNGEN,
     LIGHTS, MIMIK, NICHT_FOTO, NUR_GENANNTE,
     PAINT_TARGET, PAINTS, PALETTEN, STYLES, VARIANT_LIGHTS, VIEWS,
+    NUR_FOTO, PORTRAET_LICHTER, PORTRAET_LOOKS, PORTRAET_POSITIONEN,
 )
 from .motiv import (
     ANGLES, MATERIALS, OBJECT_ANGLES, OBJECT_SCENES, PERSON_ANGLES,
@@ -37,6 +38,7 @@ __all__ = [
     "TEMPLATES", "TRANSPARENT_TEMPLATE", "VARIANT_LIGHTS", "VARIANT_TEMPLATE",
     "VARIANT_TEMPLATE_POSE",
     "VEHICLE_ANGLES", "VEHICLE_SCENES", "VIEWS",
+    "NUR_FOTO", "PORTRAET_LICHTER", "PORTRAET_LOOKS", "PORTRAET_POSITIONEN",
     "catalog", "fragment", "overrides", "parse_command", "variant_axes",
 ]
 
@@ -48,6 +50,11 @@ def catalog() -> dict:
         "lights": [{"key": k, "label": v[0]} for k, v in LIGHTS.items()],
         "cameras": [{"key": k, "label": v[0]} for k, v in CAMERAS.items()],
         "views": [{"key": k, "label": v[0]} for k, v in VIEWS.items()],
+        # Die drei Achsen der Portraetserie, alle nur fotografisch.
+        "portraet": {name: [{"key": k, "label": v[0]} for k, v in t.items()]
+                     for name, t in (("position", PORTRAET_POSITIONEN),
+                                     ("belichtung", PORTRAET_LICHTER),
+                                     ("look", PORTRAET_LOOKS))},
         "paints": [{"key": k, "label": v[0], "phrase": v[1]} for k, v in PAINTS.items()],
         "paletten": [{"key": k, "label": v[0]} for k, v in PALETTEN.items()],
         "materials": [{"key": k, "label": v[0]} for k, v in MATERIALS.items()],

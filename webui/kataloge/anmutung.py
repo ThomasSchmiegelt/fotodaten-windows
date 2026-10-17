@@ -433,3 +433,101 @@ BEKLEIDUNGEN = {
 # Kerzenlicht auf einem Auto im Hof ergibt keine brauchbare Variante, deshalb
 # hier ohne. Wer es doch will, stellt die Lichtachse von Hand ein.
 VARIANT_LIGHTS = {k: v for k, v in LIGHTS.items() if k != "kerze"}
+
+
+# --- Portraetserie ---------------------------------------------------
+# Drei Achsen nur fuer Bildnisse, alle fotografisch. Die allgemeinen Tabellen
+# taugen dafuer nicht: CAMERAS mischt Makro, Drohne und Fischauge, STYLES
+# Zeichentrick und Manga, LIGHTS Neon -- in einer Portraetserie kam dadurch
+# zwischen zwei Fotos ploetzlich ein gemaltes Bild heraus.
+
+# Wo die Kamera steht und wie viel vom Menschen sie zeigt.
+PORTRAET_POSITIONEN = {
+    "kopf":       ("Kopf und Schultern, Augenhöhe",
+                   "head and shoulders portrait, camera at eye level, 85mm lens"),
+    "nah":        ("Großaufnahme Gesicht",
+                   "tight close-up of the face from chin to forehead, camera at eye level, 105mm lens"),
+    "drehung":    ("Dreiviertel gedreht",
+                   "three-quarter view, the face turned about 30 degrees from the camera, eyes towards the lens"),
+    "brust":      ("Brustbild",
+                   "chest-up portrait, camera at eye level, 85mm lens"),
+    "profil":     ("Profil",
+                   "clean side profile portrait, the head at 90 degrees to the camera"),
+    "oben":       ("Leicht von oben",
+                   "camera slightly above eye level, looking gently down at the person"),
+    "halb":       ("Halbtotale bis zur Hüfte",
+                   "waist-up portrait, 50mm lens at chest height"),
+    "schulter":   ("Blick über die Schulter",
+                   "the person looking back over their shoulder towards the camera"),
+    "unten":      ("Leicht von unten",
+                   "camera slightly below eye level, looking a little up at the person"),
+    "knie":       ("Amerikanisch, ab Knie",
+                   "three-quarter length portrait from the knees up, 50mm lens"),
+    "umfeld":     ("Im Umfeld",
+                   "environmental portrait with a 35mm lens, the person filling about a third of the frame, their surroundings visible"),
+    "beilaeufig": ("Unbeobachtet",
+                   "candid moment, the person looking past the camera, unposed"),
+    "ganz":       ("Ganzkörper",
+                   "full-length portrait from head to feet, 35mm lens from a few metres away"),
+}
+
+# Die klassischen Lichtfuehrungen im Studio und draussen.
+PORTRAET_LICHTER = {
+    "rembrandt":  ("Rembrandt-Licht",
+                   "Rembrandt lighting, key light high at 45 degrees, a small triangle of light on the shadow-side cheek"),
+    "butterfly":  ("Schmetterlingslicht",
+                   "butterfly lighting from high in front, a small shadow under the nose, glowing cheekbones"),
+    "loop":       ("Loop-Licht",
+                   "loop lighting, the nose shadow falling slightly down and to the side"),
+    "split":      ("Geteiltes Licht",
+                   "split lighting, exactly one half of the face lit and the other in shadow"),
+    "clamshell":  ("Beauty-Licht",
+                   "clamshell beauty lighting, soft key from above and a fill from below, even flawless light"),
+    "fenster":    ("Fensterlicht",
+                   "soft natural window light from one side, gentle falloff into shadow"),
+    "highkey":    ("High Key",
+                   "high-key lighting, bright white background, very few shadows"),
+    "lowkey":     ("Low Key",
+                   "low-key lighting, dark background, a single hard light carving the face out of the dark"),
+    "kante":      ("Kantenlicht",
+                   "rim light from behind outlining hair and shoulders, soft frontal fill"),
+    "golden":     ("Goldene Stunde",
+                   "late golden hour sun, warm light on the skin, glowing backlit hair"),
+    "schatten":   ("Offener Schatten",
+                   "open shade outdoors, soft directionless daylight, natural skin tones"),
+    "bewoelkt":   ("Bewölkt",
+                   "overcast daylight, soft even light, muted natural colours"),
+}
+
+# Bildsprache -- ausschliesslich Fotografie.
+PORTRAET_LOOKS = {
+    "studio":     ("Studio-Porträt",
+                   "professional studio portrait photograph, seamless paper backdrop"),
+    "editorial":  ("Editorial",
+                   "editorial magazine portrait photograph, styled and polished"),
+    "business":   ("Business",
+                   "corporate headshot photograph, neutral background, approachable"),
+    "sw":         ("Schwarzweiß Fine Art",
+                   "fine art black and white portrait photograph, rich tonal range"),
+    "portra":     ("Farbfilm (Portra)",
+                   "shot on Kodak Portra 400 colour film, soft pastel skin tones, fine grain"),
+    "hp5":        ("SW-Film (HP5)",
+                   "shot on Ilford HP5 black and white film, visible grain, deep blacks"),
+    "mittelformat": ("Mittelformat",
+                   "medium format camera photograph, extremely fine detail, smooth tonal transitions"),
+    "reportage":  ("Reportage",
+                   "documentary portrait photograph, natural and honest, available light"),
+    "lifestyle":  ("Lifestyle",
+                   "natural lifestyle portrait photograph, relaxed, true-to-life colours"),
+    "strasse":    ("Straßenporträt",
+                   "street portrait photograph taken in the city, background softly out of focus"),
+    "kino":       ("Filmstill",
+                   "cinematic film still shot on a cinema camera, anamorphic bokeh, subtle colour grade"),
+}
+
+# Haengt an jedem Bild der Portraetserie. Ein Stil in der Liste genuegt
+# nicht: das Modell zeichnet Menschen gern glatt wie ein 3D-Rendering.
+NUR_FOTO = ("A real photograph of a real person taken with a real camera, "
+            "not a drawing, painting, illustration, cartoon, anime or 3D "
+            "render. Natural skin texture with pores and fine hairs, "
+            "realistic eyes with catchlights, true-to-life proportions.")

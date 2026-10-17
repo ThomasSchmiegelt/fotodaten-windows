@@ -121,7 +121,33 @@ die gar nicht im Prompt stehen („unscharf“, „sechs Finger“), hilft der H
 | Varianten | Farbe, Umgebung, Licht, Kamera, Winkel werden gewürfelt — passend zur Motivart |
 | Umrundung | vorne, Seite, hinten, oben, unten |
 | Kameraperspektiven / Stile / Lichtstimmungen | der Reihe nach durch die Liste |
+| Porträt | Kameraposition der Reihe nach, dazu je eine Porträtbelichtung und ein Fotostil — nur echte Fotos |
 | alles würfeln | jedes offene Feld zufällig |
+
+**Porträtserie.** Für Bildnisse einer Person. Im Prompt nur die Person
+beschreiben („eine Frau Mitte vierzig mit kurzen grauen Haaren“), dann
+*Serie variieren: Porträt*. Die Anzahl springt auf 13, einmal durch alle
+Kamerapositionen:
+
+- **Kameraposition:** Kopf und Schultern, Großaufnahme, dreiviertel
+  gedreht, Brustbild, Profil, leicht von oben, Halbtotale, Blick über die
+  Schulter, leicht von unten, ab Knie, im Umfeld, unbeobachtet, Ganzkörper.
+- **Belichtung:** Rembrandt, Schmetterling, Loop, geteiltes Licht,
+  Beauty-Licht, Fensterlicht, High Key, Low Key, Kantenlicht, goldene
+  Stunde, offener Schatten, bewölkt.
+- **Fotostil:** Studio, Editorial, Business, Schwarzweiß Fine Art,
+  Farbfilm (Portra), SW-Film (HP5), Mittelformat, Reportage, Lifestyle,
+  Straßenporträt, Filmstill.
+
+Belichtung und Stil werden gemischt, jeder Eintrag kommt einmal dran, bevor
+sich einer wiederholt. Dieselbe Seed-Zahl ergibt dieselbe Mischung. Stil,
+Licht und Kamera aus *Darstellung* gelten in dieser Serie nicht. An jeden
+Prompt wird angehängt, dass ein echtes Foto mit natürlicher Hautstruktur
+entstehen soll, keine Zeichnung und kein 3D-Rendering. Mit **gleicher Seed**
+bleibt die Person über die Serie hinweg ähnlicher. Im Bearbeiten-Modus mit
+einem Foto als Referenz geht es auch. Welche Position, Belichtung und welcher
+Stil ein Bild bekam, steht in der PNG-Datei (`qwen_position`,
+`qwen_belichtung`, `qwen_look`).
 
 **Kurzbefehle** lassen sich direkt in den Prompt tippen und stellen die
 Regler selbst um, z. B. `/magazine cover`, `/ptexplosion`, `/cad`,

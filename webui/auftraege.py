@@ -380,7 +380,7 @@ def _save(meta: dict, image: Image.Image, stamp: str, kind: str,
     for key in ("prompt", "seed", "view", "style", "light", "camera", "effect",
                 "form", "paint", "palette", "scene", "angle", "device",
                 "scenario", "material", "haltung", "kleidung", "retusche",
-                "quelle"):
+                "quelle", "position", "belichtung", "look"):
         if meta.get(key) is not None:
             info.add_text(f"qwen_{key}", str(meta[key]))
     image.save(os.path.join(ziel(), name), pnginfo=info)

@@ -34,7 +34,8 @@ from diffusers.pipelines.qwenimage21.pipeline_qwenimage21 import calculate_dimen
 import cloud  # noqa: E402
 from kataloge import (
     ANGLES, AXIS_OFF, CAMERAS, DEVICES, EFFECTS, FORMS, GROUP_ACTIONS, LIGHTS,
-    BEKLEIDUNGEN, HALTUNGEN, MATERIALS, PAINTS, PALETTEN, SCENARIOS, SCENES,
+    BEKLEIDUNGEN, HALTUNGEN, MATERIALS, NUR_FOTO, PAINTS, PALETTEN,
+    PORTRAET_LICHTER, PORTRAET_LOOKS, PORTRAET_POSITIONEN, SCENARIOS, SCENES,
     STYLES, TEMPLATES,
     TRANSPARENT_TEMPLATE, VARIANT_TEMPLATE_POSE,
     VIEWS, fragment, variant_axes,
@@ -342,6 +343,9 @@ class Engine:
           "camera"    geht die Kameraperspektiven der Reihe nach durch
           "style"     dito fuer Stile, "light" fuer Lichtstimmungen
           "random"    wuerfelt jedes offene Feld -- reproduzierbar aus dem Seed
+          "portraet"  Kameraposition der Reihe nach, Belichtung und Fotostil
+                      gemischt -- nur Fotografie. Ersetzt Stil, Licht und
+                      Kamera; ein gezeichneter Stil kaeme sonst dazwischen
           "varianten" wuerfelt Lack, Farbstimmung, Stil, Umgebung, Licht,
                       Kameraart und Blickwinkel
                       fuer jedes Bild neu. Eine Achse auf AXIS_OFF bleibt dabei
@@ -358,6 +362,13 @@ class Engine:
                   "angle": ANGLES, "device": DEVICES, "material": MATERIALS,
                   "haltung": HALTUNGEN, "kleidung": BEKLEIDUNGEN}
         rng = random.Random(seed)
+        # Fuer die Portraetserie: Belichtung und Stil gemischt, aber jeder
+        # Eintrag einmal, bevor sich einer wiederholt. Die drei Laengen sind
+        # verschieden, so ergibt sich bei jedem Durchgang ein neues Paar.
+        lichter = list(PORTRAET_LICHTER)
+        looks = list(PORTRAET_LOOKS)
+        rng.shuffle(lichter)
+        rng.shuffle(looks)
         jobs = []
         for i in range(count):
             pick = {"view": view, "style": style, "light": light, "camera": camera,
@@ -375,6 +386,23 @@ class Engine:
                 for field, table in tables.items():
                     if field != "view" and not pick[field]:
                         pick[field] = rng.choice(list(table))
+            elif sweep == "portraet":
+                portraet = {
+                    "position": list(PORTRAET_POSITIONEN)[i % len(PORTRAET_POSITIONEN)],
+                    "belichtung": lichter[i % len(lichter)],
+                    "look": looks[i % len(looks)],
+                }
+                pick.update(style=None, light=None, camera=None)
+                pick = {k: _axis(v) for k, v in pick.items()}
+                text = ", ".join([
+                    build_prompt(prompt, paint_target=paint_target, **pick),
+                    PORTRAET_POSITIONEN[portraet["position"]][1],
+                    PORTRAET_LICHTER[portraet["belichtung"]][1],
+                    PORTRAET_LOOKS[portraet["look"]][1],
+                ])
+                jobs.append({"seed": seed if lock_seed else seed + i,
+                             "prompt": f"{text}. {NUR_FOTO}", **pick, **portraet})
+                continue
             elif sweep in tables:
                 # Der Reihe nach, damit sich die Bilder garantiert unterscheiden.
                 keys = list(tables[sweep])

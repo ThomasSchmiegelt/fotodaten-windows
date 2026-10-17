@@ -48,7 +48,8 @@ fetch("/api/info").then(r => r.json()).then(info => {
   retVorlagenFuellen(info.retusche);
   refBudget = info.reference_token_budget;
   Object.assign(SWEEP_LEN, {view: info.views.length, style: info.styles.length,
-                            light: info.lights.length, camera: info.cameras.length});
+                            light: info.lights.length, camera: info.cameras.length,
+                            portraet: info.portraet ? info.portraet.position.length : 0});
   fill("view", info.views); fill("style", info.styles);
   fill("light", info.lights); fill("camera", info.cameras);
   EFFECTS = info.effects; FORMS = info.forms;
@@ -196,6 +197,7 @@ const SWEEP_LEN = {};
 function sweepChanged() {
   const s = $("sweep").value, n = SWEEP_LEN[s];
   if (n) $("count").value = Math.min(n, 20);
+  $("sweepHint").hidden = s !== "portraet";
   $("seedHint").textContent = $("lockSeed").checked
     ? "Gleicher Seed: Kleidung, Umgebung und Bildaufbau bleiben über die Serie hinweg stabiler."
     : "Aufsteigende Seeds: jedes Bild wird eigenständiger, aber weniger konsistent.";
