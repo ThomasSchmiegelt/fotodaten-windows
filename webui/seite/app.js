@@ -3539,7 +3539,40 @@ async function datensatzHolen() {
     + `${z.verworfen || 0} verworfen · Klassen: ${esc((g.klassen || []).join(", ") || "—")}<br>`
     + `<code>${esc(g.pfad || "")}</code>`;
   datensatzZeigen();
+  UMGEBUNGEN = g.umgebungen || {};
+  if (!$("mehrOrte").value.trim()) mehrOrteFuellen();
+  $("mehrKopf").dataset.zahl = g.originale || 0;
+  $("mehrGo").textContent = `${g.originale || 0} Vorlagen vervielfältigen`;
 }
+
+// ---------- Vervielfaeltigen ----------
+let UMGEBUNGEN = {};
+function mehrOrteFuellen() {
+  $("mehrOrte").value = (UMGEBUNGEN[$("mehrMotiv").value] || []).join("\n");
+}
+$("mehrMotiv").onchange = mehrOrteFuellen;
+$("mehrUmgebung").onchange = () =>
+  $("mehrUmgebungBox").style.display = $("mehrUmgebung").checked ? "block" : "none";
+$("mehrGo").onclick = async e => {
+  e.preventDefault();
+  if (!$("mehrKlassisch").checked && !$("mehrUmgebung").checked)
+    return say("Bitte mindestens ein Verfahren wählen.", "err");
+  const res = await fetch("/api/datensatz", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({tu: "vervielfaeltigen",
+      je_bild: parseInt($("mehrJe").value, 10) || 10,
+      klassisch: $("mehrKlassisch").checked, spiegeln: $("mehrSpiegeln").checked,
+      umgebung: $("mehrUmgebung").checked, umgebungen: $("mehrOrte").value,
+      staerke: parseFloat($("mehrStaerke").value), behalten: $("mehrBehalten").checked})
+  }).catch(() => null);
+  if (!res || !res.ok) {
+    const err = res ? await res.json().catch(() => ({})) : {};
+    return say(err.error || "Der Server antwortet nicht.", "err");
+  }
+  buttonState("busy");
+  say("Wird vervielfältigt …", "ok");
+  poll();
+};
 
 function dsRahmen(box, e, klasse) {
   if (!box) return "";
@@ -3550,7 +3583,11 @@ function dsRahmen(box, e, klasse) {
 
 function datensatzZeigen() {
   const status = $("dsFilter").value;
-  const liste = DATENSATZ.filter(e => e.status === status);
+  // Vervielfaeltigte stehen fuer sich -- es koennen tausende sein, und
+  // zwischen ihnen gingen die gepruefte Vorlagen unter.
+  const liste = status === "mehr"
+    ? DATENSATZ.filter(e => e.status === "ok" && e.quelle).slice(0, 200)
+    : DATENSATZ.filter(e => e.status === status && (status !== "ok" || !e.quelle));
   $("dsListe").innerHTML = liste.length ? `<div class="dsgitter">` + liste.map(e => {
     const neu = DSNEU[e.datei];
     const gruende = (e.gruende || []).join(" · ");

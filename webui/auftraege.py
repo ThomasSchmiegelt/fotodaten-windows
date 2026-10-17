@@ -41,6 +41,7 @@ import datensatz  # noqa: E402
 import detektor  # noqa: E402
 import sechsseiten  # noqa: E402
 import retusche  # noqa: E402
+import vervielfaeltigen  # noqa: E402
 from torwache import torwaechter  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -118,6 +119,8 @@ def _titel(art: str, params: dict) -> str:
         was = (params.get("name") or params.get("text") or "").strip()
         art = "Erstes Bild" if params.get("stufe") == "erstes" else "Sechs Seiten"
         return f"{art}: {was[:44]}" if was else art
+    if art == "vervielfaeltigen":
+        return f"Datensatz vervielfältigen, {params.get('je_bild') or 10} je Bild"
     if art == "retusche":
         text = (params.get("prompt") or "").strip()
         return f"Retusche: {text[:48]}" if text else "Retusche"
@@ -296,7 +299,8 @@ def _abarbeiten(auftrag: dict, weitere: list[dict] | None = None) -> None:
                       "aufbau": run_aufbau, "prosa": run_prosa,
                       "szenenbau": run_szenenbau,
                       "sechsseiten": run_sechsseiten, "detektor": run_detektor,
-                      "retusche": run_retusche}
+                      "retusche": run_retusche,
+                      "vervielfaeltigen": run_vervielfaeltigen}
             laeufe.get(auftrag["art"], run_job)(auftrag["params"])
         else:
             # Ein Ladevorgang fuer alle: die fertigen Prompts gehen als Liste
@@ -617,6 +621,94 @@ def run_retusche(params: dict) -> None:
         print(err, file=sys.stderr)
         current["error"] = err.strip().splitlines()[-1]
         engine.note("error", current["error"])
+
+
+def run_vervielfaeltigen(params: dict) -> None:
+    """Aus den gepruefte Bildern des Datensatzes viele machen -- siehe
+    vervielfaeltigen.py. Die Box wandert rechnerisch mit."""
+    import random
+    umgebung = None
+    try:
+        engine._cancel = False
+        engine.aborted = False
+        projekt = _projekt_des_laufs
+        vorlagen = datensatz.originale(projekt)
+        if not vorlagen:
+            raise RuntimeError("Im Datensatz ist noch kein aufgenommenes Bild "
+                               "mit Box -- erst Basisbilder erzeugen und prüfen")
+        je_bild = max(1, min(int(params.get("je_bild") or 10), 200))
+        mit_umgebung = bool(params.get("umgebung"))
+        mit_klassisch = bool(params.get("klassisch", True)) or not mit_umgebung
+        umgebungen = [z.strip() for z in str(params.get("umgebungen") or "").splitlines()
+                      if z.strip()] or vervielfaeltigen.UMGEBUNGEN["gegenstand"]
+        staerke = max(0.3, min(float(params.get("staerke") or 0.75), 1.0))
+        behalten = bool(params.get("behalten", True))
+        spiegeln = bool(params.get("spiegeln", True))
+        rng = random.Random(int(params.get("seed") or 0) or None)
+        if mit_umgebung:
+            umgebung = vervielfaeltigen.Umgebung(melden)
+
+        ordner = os.path.join(datensatz.wurzel(projekt), "images")
+        vorhanden = set(os.listdir(ordner))
+        gesamt, fertig, neue = len(vorlagen) * je_bild, 0, []
+        for vorlage in vorlagen:
+            pfad = datensatz.bildpfad(projekt, "ok", vorlage["datei"])
+            if not pfad:
+                continue
+            with Image.open(pfad) as roh:
+                original = roh.convert("RGB")
+            stamm = vorlage["datei"][:-4]
+            nummer = 1
+            for _ in range(je_bild):
+                if engine._cancel:
+                    break
+                while f"{stamm}_mehr{nummer:02d}.png" in vorhanden:
+                    nummer += 1
+                name = f"{stamm}_mehr{nummer:02d}.png"
+                vorhanden.add(name)
+                melden(f"Vervielfältigen: {vorlage['datei'][:28]}… {fertig + 1}/{gesamt}",
+                       fertig, gesamt)
+                bild, box, achsen, prompt = original, list(vorlage["box"]), {}, ""
+                seed = rng.randrange(2 ** 31)
+                if mit_umgebung:
+                    ort = rng.choice(umgebungen)
+                    prompt = vervielfaeltigen.prompt_fuer(
+                        vorlage.get("suche") or vorlage["klasse"], ort)
+                    bild = umgebung.rechnen(original, prompt, seed, staerke)
+                    if behalten:
+                        bild = vervielfaeltigen.gegenstand_behalten(bild, original, box)
+                    achsen["umgebung"] = ort
+                if mit_klassisch:
+                    bild, box = vervielfaeltigen.klassisch(bild, box, rng, spiegeln)
+                    achsen["klassisch"] = "ja"
+                bild.save(os.path.join(ordner, name))
+                neue.append({
+                    "datei": name, "klasse": vorlage["klasse"],
+                    "suche": vorlage.get("suche") or "",
+                    "breite": bild.size[0], "hoehe": bild.size[1],
+                    "angelegt": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "prompt": prompt, "seed": seed, "achsen": achsen,
+                    "box": box, "status": "ok", "gruende": [],
+                    "quelle": vorlage["datei"]})
+                fertig += 1
+            # Zwischendurch sichern: ein Abbruch nach einer Stunde soll nicht
+            # alles kosten, was bis dahin entstanden ist.
+            datensatz.hinzufuegen(projekt, neue)
+            if engine._cancel:
+                break
+        melden("")
+        current["datensatz"] = {"ok": fertig, "pruefen": 0}
+        engine.note("idle", ("abgebrochen nach " if engine.aborted else "fertig: ")
+                    + f"{fertig} Bilder vervielfältigt aus {len(vorlagen)} Vorlagen")
+    except Exception:
+        err = traceback.format_exc()
+        print(err, file=sys.stderr)
+        current["error"] = err.strip().splitlines()[-1]
+        melden("")
+        engine.note("error", current["error"])
+    finally:
+        if umgebung is not None:
+            umgebung.schliessen()
 
 
 def run_expose(params: dict) -> None:

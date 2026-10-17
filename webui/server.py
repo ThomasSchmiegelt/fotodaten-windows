@@ -44,6 +44,7 @@ import datensatz  # noqa: E402
 import detektor  # noqa: E402
 import sechsseiten  # noqa: E402
 import retusche  # noqa: E402
+import vervielfaeltigen  # noqa: E402
 from kataloge import (  # noqa: E402
     AXIS_OFF, EFFECTS, EINSTELLUNGEN, FOLGEN, GEZEICHNET, GROUP_ACTIONS,
     MIMIK, PAINT_TARGET, WESEN,
@@ -1070,7 +1071,14 @@ class Handler(BaseHTTPRequestHandler):
             projekt = projekte.aktiv()
             if (params.get("tu") or "liste") == "liste":
                 return self._json(200, {**datensatz.uebersicht(projekt),
-                                        "projekt": projekt})
+                                        "projekt": projekt,
+                                        "umgebungen": vervielfaeltigen.UMGEBUNGEN})
+            if params.get("tu") == "vervielfaeltigen":
+                if not datensatz.originale(projekt):
+                    return self._json(400, {"error": "Noch kein aufgenommenes Bild mit "
+                                            "Box -- erst Basisbilder erzeugen und prüfen"})
+                nummer = einreihen("vervielfaeltigen", params)["nummer"]
+                return self._json(202, {"ok": True, "nummer": nummer})
             if params.get("tu") == "setzen":
                 e = datensatz.setzen(projekt, str(params.get("datei") or ""),
                                      str(params.get("status") or ""),

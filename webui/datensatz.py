@@ -56,6 +56,10 @@ GLEICH = 0.5
 ZU_GROSS = 0.5
 # Nur DINO-Boxen ab diesem Wert zaehlen ueberhaupt.
 DINO_SCHWELLE = 0.2
+# Darunter passt Qwen3-VL-2B (~4,5 GB in bfloat16) nicht neben DINO auf die
+# Karte. Es rechnet dann auf der CPU -- langsamer, aber bei ein paar Dutzend
+# Basisbildern egal. QWEN_BOX_GERAET=cpu|cuda setzt es fest.
+VL_KLEINE_KARTE = 8 * 1024 ** 3
 
 ORDNER = {"ok": "images", "pruefen": "pruefen", "verworfen": "verworfen"}
 DATEI = re.compile(r"[\w.\-]+\.png")
@@ -189,14 +193,41 @@ def setzen(projekt: str, datei: str, status: str, box: list | None = None) -> di
             e["von_hand"] = True
         if status == "ok" and not e.get("box"):
             return None
-        pfad = wurzel(projekt)
-        alt = os.path.join(pfad, ORDNER[e["status"]], datei)
-        neu = os.path.join(pfad, ORDNER[status], datei)
-        if alt != neu and os.path.isfile(alt):
-            shutil.move(alt, neu)
-        e["status"] = status
+        _verschieben(projekt, e, status)
+        # Was aus diesem Bild vervielfaeltigt wurde, traegt seine alte Box
+        # mit. Faellt die Vorlage heraus oder bekommt eine neue Box, stimmt
+        # das nicht mehr -- verworfen, nicht geloescht.
+        if box is not None or status != "ok":
+            for kind in daten:
+                if kind.get("quelle") == datei and kind["status"] != "verworfen":
+                    _verschieben(projekt, kind, "verworfen")
+                    kind["gruende"] = ["Vorlage geändert"]
         _speichern(projekt, daten)
         return e
+
+
+def _verschieben(projekt: str, e: dict, status: str) -> None:
+    """Die Datei in den Ordner ihres neuen Status legen."""
+    pfad = wurzel(projekt)
+    alt = os.path.join(pfad, ORDNER[e["status"]], e["datei"])
+    neu = os.path.join(pfad, ORDNER[status], e["datei"])
+    if alt != neu and os.path.isfile(alt):
+        shutil.move(alt, neu)
+    e["status"] = status
+
+
+def originale(projekt: str) -> list[dict]:
+    """Aufgenommene Bilder mit Box, die nicht selbst vervielfaeltigt sind."""
+    return [e for e in eintraege(projekt)
+            if e.get("status") == "ok" and e.get("box") and not e.get("quelle")]
+
+
+def hinzufuegen(projekt: str, neue: list[dict]) -> None:
+    """Fertige Eintraege anhaengen -- die Dateien liegen schon in images/."""
+    with _sperre:
+        namen = {n["datei"] for n in neue}
+        daten = [e for e in eintraege(projekt) if e["datei"] not in namen] + neue
+        _speichern(projekt, daten)
 
 
 # --- Erkennen -------------------------------------------------------------
@@ -229,9 +260,12 @@ class Erkenner:
                                   AutoProcessor)
         self.torch = torch
         self.geraet = "cuda" if torch.cuda.is_available() else "cpu"
+        self.vl_geraet = os.environ.get("QWEN_BOX_GERAET") or (
+            "cpu" if self.geraet == "cpu" or torch.cuda.get_device_properties(0)
+            .total_memory < VL_KLEINE_KARTE else "cuda")
         self.vl_proc = AutoProcessor.from_pretrained(VL_MODELL)
         self.vl = AutoModelForImageTextToText.from_pretrained(
-            VL_MODELL, dtype=torch.bfloat16).to(self.geraet).eval()
+            VL_MODELL, dtype=torch.bfloat16).to(self.vl_geraet).eval()
         self.dino_proc = AutoProcessor.from_pretrained(DINO_MODELL)
         self.dino = AutoModelForZeroShotObjectDetection.from_pretrained(
             DINO_MODELL).to(self.geraet).eval()
@@ -251,7 +285,7 @@ class Erkenner:
                                                   {"type": "text", "text": frage}]}]
         eingabe = self.vl_proc.apply_chat_template(
             nachricht, tokenize=True, add_generation_prompt=True,
-            return_dict=True, return_tensors="pt").to(self.geraet)
+            return_dict=True, return_tensors="pt").to(self.vl_geraet)
         with self.torch.no_grad():
             aus = self.vl.generate(**eingabe, max_new_tokens=120, do_sample=False)
         text = self.vl_proc.batch_decode(
@@ -375,4 +409,6 @@ def uebersicht(projekt: str) -> dict:
     daten = eintraege(projekt)
     return {"pfad": wurzel(projekt), "klassen": klassen(projekt),
             "zahlen": {s: sum(1 for e in daten if e["status"] == s) for s in ORDNER},
+            "originale": sum(1 for e in daten if e["status"] == "ok"
+                             and e.get("box") and not e.get("quelle")),
             "eintraege": list(reversed(daten))}

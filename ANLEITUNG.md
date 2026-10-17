@@ -272,9 +272,9 @@ dazu.) Der Datensatz wird trotzdem auch im YOLO-Format abgelegt — wer mag,
 kann ihn mit jedem Werkzeug weiterverwenden.
 
 ```
- Basisbild ──► Varianten ──► Box suchen ──► Datensatz prüfen ──► Detektor trainieren ──► am Foto testen
-                (Reiter       (automatisch)   (Reiter              (Reiter
-                Varianten)                    Datensatz)            Training)
+ Basisbild ──► Varianten ──► Box suchen ──► Datensatz prüfen ──► Vervielfältigen ──► Detektor trainieren ──► am Foto testen
+                (Reiter       (automatisch)   (Reiter              (Reiter Datensatz,   (Reiter
+                Varianten)                    Datensatz)            optional)            Training)
 ```
 
 ### Schritt 1 — Projekt anlegen
@@ -319,12 +319,66 @@ Reiter **Datensatz**, oben die Zahlen, darunter die Bilder:
 | Bild unbrauchbar | **✗ verwerfen** (wird verschoben, nicht gelöscht) |
 | doch noch einmal ansehen | **zurück auf prüfen** |
 
-Über **Zeigen** wechselt man zwischen *zu prüfen*, *aufgenommen* und
-*verworfen* — auch aufgenommene Bilder lassen sich so noch korrigieren.
+Über **Zeigen** wechselt man zwischen *zu prüfen*, *aufgenommen*,
+*vervielfältigt* und *verworfen* — auch aufgenommene Bilder lassen sich so noch korrigieren.
 
 **Wichtig:** nur aufgenommene Bilder gehen ins Training. Bilder ohne Box
 liegen bewusst nicht im Trainingsordner — ein Bild ohne Label hieße dort
 „hier ist keine Kupplung“.
+
+### Schritt 3½ — Vervielfältigen (optional)
+
+Aus wenigen geprüften Bildern viele machen, **ohne neue Box**: Es wird nur
+so verändert, dass man weiß, wohin die Box wandert. Unten im Reiter
+**Datensatz**, Abschnitt **Vervielfältigen**:
+
+| Verfahren | Was es tut | Braucht |
+|---|---|---|
+| **Klassisch** | spiegeln, hineinzoomen, Helligkeit, Kontrast, Farbe, Unschärfe, Rauschen, JPEG | nur CPU, sehr schnell |
+| **Neue Umgebung** | Stable Diffusion 1.5 + ControlNet: die Umrisse bleiben, Umgebung, Licht und Oberflächen wechseln | ab 4 GB Grafikkarte; beim ersten Mal ~3 GB Download |
+
+- **Neue Bilder je Vorlage**: wie viele aus jedem aufgenommenen Bild werden.
+- **Umgebungen**: eine je Zeile, zufällig gewählt. Vorbefüllt mit den
+  Umgebungen aus dem Varianten-Katalog (Fahrzeug, Gegenstand, Person).
+- **Veränderung**: wenig hält sich eng ans Basisbild, viel wechselt mehr,
+  verschiebt aber auch eher die Umrisse.
+- **Gegenstand unverändert lassen**: Der Gegenstand wird nach dem Rechnen
+  aus dem Original zurückgesetzt, nur das Drumherum wechselt. Ausschalten,
+  wenn der Gegenstand selbst auch anders aussehen darf (Farbe, Rost …).
+- **spiegeln erlaubt**: ausschalten bei Schrift oder Teilen, die es nur
+  seitenrichtig gibt.
+
+Die Ergebnisse heißen wie ihre Vorlage plus `_mehr01`, `_mehr02` … und
+stehen unter **Zeigen › vervielfältigt**. Beim Training landen sie immer auf
+derselben Seite wie ihre Vorlage, damit die Validierung nicht schöngerechnet
+wird. **Ändert sich später die Box einer Vorlage** oder wird sie verworfen,
+werden ihre Abkömmlinge verworfen (nicht gelöscht). Danach einfach neu
+vervielfältigen.
+
+Gemessen auf der RTX 3090: klassisch Bruchteile einer Sekunde je Bild, neue
+Umgebung 3–4 s. Auf einer kleinen Karte siehe unten.
+
+### Mit kleiner Grafikkarte (ab 4 GB)
+
+Qwen-Image selbst braucht ~17 GB und läuft auf einer kleinen Karte nicht.
+Die Kette geht trotzdem, aufgeteilt:
+
+1. **Basisbilder aus der Cloud.** Kopfzeile › **Cloud-Modelle** ›
+   Bildmodell eintragen und „Cloud statt lokal“ anhaken. Dann wie in
+   Schritt 2 mit **Varianten** und Haken bei **Trainingsdaten** —
+   20 bis 50 Bilder aus verschiedenen Blickwinkeln reichen.
+2. **Boxen lokal.** Das Programm erkennt die kleine Karte (unter 8 GB) und
+   lässt Qwen3-VL auf der CPU rechnen; Grounding DINO bleibt auf der Karte
+   (gemessen ~2 GB). Das dauert etwa anderthalb Minuten je Bild.
+3. **Prüfen** wie in Schritt 3.
+4. **Lokal vervielfältigen** wie oben. SD 1.5 wird dann Schicht für Schicht
+   auf die Karte geholt: gemessen 1,3 GB Spitze, auf der 3090 ~18 s je Bild,
+   auf einer kleinen Karte entsprechend länger.
+5. **Trainieren**: D-FINE *nano* oder *small* mit kleiner Bildgröße.
+
+Die Vielfalt der Blickwinkel kommt so vom großen Modell, die Menge vom
+eigenen Rechner. `QWEN_BOX_GERAET=cpu` bzw. `cuda` legt fest, wo Qwen3-VL
+rechnet, unabhängig von der Kartengröße.
 
 ### Schritt 4 — Detektor trainieren
 
@@ -405,7 +459,9 @@ Der Datensatz selbst liegt in `projekte/<Projekt>/datensatz/` und ist
 ### Damit das Modell etwas taugt
 
 - **Menge:** einige hundert aufgenommene Bilder sind ein vernünftiges Ziel.
-  Mit einer Handvoll prüft man nur, ob die Kette läuft.
+  Mit einer Handvoll prüft man nur, ob die Kette läuft. Vervielfältigen
+  bringt Menge, aber keine neuen Blickwinkel; die müssen aus den
+  Basisbildern kommen.
 - **Echte Fotos zum Testen.** Die eigentliche Frage ist, ob ein Modell aus
   erzeugten Bildern echte Objekte findet.
 - **Abwechslung:** Kamera, Licht, Umgebung würfeln lassen — aber Stil auf

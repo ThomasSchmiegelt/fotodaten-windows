@@ -5,8 +5,9 @@ Text zu Bild, Bildbearbeitung, Gruppenbilder und Serien mit
 Rechner; Sprach- und Bildmodell lassen sich wahlweise auf eine
 OpenAI-kompatible Cloud-Schnittstelle umstellen. Dazu eine Freitexteingabe auf
 Deutsch, ein GIMP-Plugin und eine Kette für **Trainingsdaten**: Varianten
-erzeugen, Bounding Boxes automatisch setzen und prüfen, einen Detektor
-(D-FINE) trainieren.
+erzeugen, Bounding Boxes automatisch setzen und prüfen, lokal
+vervielfältigen (die Box rechnet mit, das geht auch auf einer 4-GB-Karte),
+einen Detektor (D-FINE) trainieren.
 
 **Wie man damit arbeitet, steht in der [Bedienungsanleitung](ANLEITUNG.md).**
 Diese README erklärt, wie es gebaut ist und warum.
@@ -69,7 +70,9 @@ rund 31 GB in den Hugging-Face-Cache.
 
 Die Modelle für Trainingsdaten und Detektor — Qwen3-VL-2B und Grounding DINO
 für die Boxen, D-FINE zum Trainieren — lädt das Programm beim ersten Gebrauch
-selbst, zusammen rund 5 GB. Sie laufen mit dem schon installierten
+selbst, zusammen rund 5 GB. Wer im Datensatz **neue Umgebungen**
+vervielfältigt, lädt dazu einmalig Stable Diffusion 1.5 und ein ControlNet
+(~3 GB). Sie laufen mit dem schon installierten
 `transformers`; das Training braucht zusätzlich `scipy` (steht in
 `requirements.txt`).
 
@@ -653,6 +656,7 @@ webui/cover.py        die Eingabemaske fuer ein Titelblatt
 webui/retusche.py     Ausschnitt um eine Maske, Farbangleich, Einsetzen
 webui/cloud.py        Sprach- und Bildmodell ueber eine OpenAI-kompatible API
 webui/datensatz.py    Bounding Boxes (Qwen3-VL + Grounding DINO), YOLO/COCO
+webui/vervielfaeltigen.py  aus gepruefte Bildern viele, die Box rechnet mit
 webui/detektor.py     Detektor-Training (D-FINE): Aufteilung, Laeufe, Ausprobieren
 webui/detektor_lauf.py  das Training selbst, als eigener Prozess; mAP-Berechnung
 webui/ablauf.py       Abläufe als Blöcke, mitgelieferte Folgen
@@ -708,10 +712,13 @@ ersten Gebrauch, und es gilt jeweils deren eigene Lizenz.
 | Qwen3-VL-2B-Instruct | Bounding Box setzen | Apache 2.0 | ja |
 | Grounding DINO (base) | Bounding Box gegenprüfen | Apache 2.0 | ja |
 | D-FINE (nano/small/medium, COCO) | Detektor trainieren | Apache 2.0 | ja — auch die trainierten Gewichte |
+| Stable Diffusion 1.5 | Datensatz vervielfältigen (neue Umgebung) | CreativeML OpenRAIL-M | ja, mit den Nutzungsbeschränkungen der Lizenz |
+| ControlNet 1.1 Canny (lllyasviel) | dabei die Umrisse festhalten | OpenRAIL | ja, mit Nutzungsbeschränkungen |
 | diffusers, transformers, accelerate, huggingface_hub, safetensors | Grundlage | Apache 2.0 | ja |
 | PyTorch, torchvision | Grundlage | BSD-3-Clause | ja |
 | SciPy | Training | BSD-3-Clause | ja |
 | Pillow | Bilder lesen und schreiben | MIT-CMU | ja |
+| NumPy | Retusche, Vervielfältigen | BSD-3-Clause | ja |
 | Sprachmodell über Ollama oder Cloud | Übersetzen, Prompts | je nach gewähltem Modell bzw. Anbieter | prüfen |
 
 **Warum D-FINE und nicht Ultralytics YOLO.** Ultralytics steht unter
