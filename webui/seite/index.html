@@ -555,6 +555,13 @@
         und dient den Varianten als Bezug. Ohne Box sucht sie der Erkenner.</p>
       <div id="fdFotos" class="dsgitter"></div>
 
+      <p class="hint"><b>Was unverändert bleiben soll, ausmalen:</b> über
+        <b>⤢ ausmalen</b> öffnet sich das Foto groß. Mit dem Pinsel nur die
+        Kupplung bemalen — nicht das Auto daneben, das soll sich ja ändern.
+        Nach dem Erzeugen werden genau diese Pixel aus dem Original in jede
+        Variante zurückgesetzt, ans neue Licht angeglichen. Die Box ergibt
+        sich dann von selbst aus der Maske.</p>
+
       <h3 class="stufe">2 · Was gesucht wird</h3>
       <div class="axis">
         <div>
@@ -617,11 +624,55 @@
         Originalfotos mit in den Datensatz</label>
       <label class="check"><input type="checkbox" id="fdLabeln" checked>
         Bounding Boxes gleich setzen</label>
+      <label class="check"><input type="checkbox" id="fdBewahren" checked>
+        Gemalten Bereich aus dem Original einsetzen</label>
+      <label class="check"><input type="checkbox" id="fdLicht" checked>
+        … dabei ans neue Licht angleichen</label>
       <p class="hint" id="fdVorschau"></p>
       <p class="hint">Gestartet wird mit dem großen Knopf unten. Danach im
         Reiter <b>Datensatz</b> die Prüfliste ansehen, im Reiter
         <b>Training</b> D-FINE oder YOLO26 trainieren.</p>
     </fieldset>
+
+
+    <!-- Grosser Editor: gemalter Bereich (bleibt unveraendert) und Box, mit
+         Zoom. Fotodaten und Datensatz teilen ihn sich. -->
+    <div id="edEditor" class="ededitor" style="display:none" role="dialog" aria-label="Bild bearbeiten">
+      <div class="edleiste">
+        <span class="edgruppe">
+          <button type="button" id="edPinsel" data-modus="pinsel" title="Bereich malen, der unverändert bleibt">🖌 Bewahren malen</button>
+          <button type="button" id="edRadierer" data-modus="radierer" title="Gemaltes wegnehmen">⌫ Radierer</button>
+          <button type="button" id="edBoxModus" data-modus="box" title="Box um das Objekt ziehen">▭ Box ziehen</button>
+        </span>
+        <label class="edgroesse" id="edGroesseZeile">Pinsel
+          <input type="range" id="edGroesse" min="2" max="300" value="24">
+          <span id="edGroesseText"></span></label>
+        <span class="edgruppe">
+          <button type="button" id="edKleiner" title="Verkleinern (Strg+Mausrad)">−</button>
+          <span id="edZoomText">100%</span>
+          <button type="button" id="edGroesser" title="Vergrößern (Strg+Mausrad)">+</button>
+          <button type="button" id="edEinpassen">einpassen</button>
+          <button type="button" id="edEins">1:1</button>
+        </span>
+        <span class="edgruppe">
+          <button type="button" id="edLeeren">Maske leeren</button>
+          <button type="button" id="edBoxWeg">Box weg</button>
+        </span>
+        <span class="edgruppe edrechts">
+          <button type="button" id="edAbbrechen">Abbrechen</button>
+          <button type="button" id="edFertig" class="edfertig">Übernehmen</button>
+        </span>
+      </div>
+      <p class="hint edhinweis" id="edHinweis"></p>
+      <div id="edFlaeche" class="edflaeche">
+        <div id="edInnen" class="edinnen">
+          <img id="edBild" alt="" draggable="false">
+          <canvas id="edMaske"></canvas>
+          <div id="edBox" class="dsbox dsneu" style="display:none"></div>
+          <div id="edZeiger" class="edzeiger"></div>
+        </div>
+      </div>
+    </div>
 
     <fieldset id="trainingTabBox" style="display:none">
       <legend>Detektor-Training (D-FINE oder YOLO26)</legend>

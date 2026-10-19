@@ -166,6 +166,113 @@ def vorbereiten(bild: Image.Image) -> Image.Image:
     return bild
 
 
+# --- Bewahren: einen gemalten Bereich aus dem Original einsetzen ------------
+#
+# Ein img2img-Modell (Z Image Turbo) zeichnet das ganze Bild neu, auch die
+# Kupplung -- "alles ausser der Kupplung" kann es nicht. Eine Box um die
+# Kupplung hilft nicht: sie enthielte auch ein Stueck Auto, und das soll sich
+# ja aendern. Deshalb wird die Kupplung selbst ausgemalt, und nach dem
+# Rechnen kommen genau diese Pixel aus dem Original zurueck ins neue Bild.
+#
+# Das Bild verrutscht dabei leicht -- img2img haelt den Aufbau, aber nicht
+# pixelgenau. `ausrichten` sucht die Stelle, an der die Kupplung jetzt sitzt:
+# Kantenbild des Originals um die Maske gegen das Kantenbild der Variante,
+# normierte Korrelation in einem Fenster von +-8 % der Bildgroesse. Kanten
+# statt Farben, weil sich die Farben ja gerade aendern sollen.
+
+LAGE_SICHER = 0.35        # darunter: eingesetzt, aber auf die Pruefliste
+SUCHFENSTER = 0.08        # Anteil der Bildkante, um den gesucht wird
+ANALYSE = 320             # Kante, auf der gesucht wird
+
+
+def maske_lesen(bild: Image.Image, groesse: tuple) -> Image.Image | None:
+    """Die gemalte Maske in Fotogroesse, 0/255. None, wenn nichts gemalt ist."""
+    import retusche
+    maske = retusche.maske_lesen(ImageOps.exif_transpose(bild), groesse)
+    return maske if maske.getbbox() else None
+
+
+def _kanten(bild: Image.Image, f: int):
+    import numpy as np
+    g = np.asarray(bild.convert("L").resize(
+        (max(1, bild.size[0] // f), max(1, bild.size[1] // f)), Image.BILINEAR),
+        dtype=np.float32)
+    gx = np.abs(np.diff(g, axis=1, prepend=g[:, :1]))
+    gy = np.abs(np.diff(g, axis=0, prepend=g[:1, :]))
+    return gx + gy
+
+
+def ausrichten(original: Image.Image, maske: Image.Image,
+               variante: Image.Image) -> tuple[int, int, float]:
+    """Wohin ist der gemalte Bereich in der Variante gewandert? (dx, dy, Guete).
+
+    Alle drei Bilder in derselben Groesse. Guete ist die Korrelation der
+    Kantenbilder, 1 hiesse deckungsgleich.
+    """
+    import numpy as np
+    breite, hoehe = original.size
+    f = max(1, round(max(breite, hoehe) / ANALYSE))
+    x1, y1, x2, y2 = maske.getbbox()
+    rand = 0.25 * max(x2 - x1, y2 - y1)
+    p = [max(0, int((x1 - rand) / f)), max(0, int((y1 - rand) / f)),
+         min(breite // f, int((x2 + rand) / f) + 1), min(hoehe // f, int((y2 + rand) / f) + 1)]
+    a = _kanten(original, f)[p[1]:p[3], p[0]:p[2]]
+    b = _kanten(variante, f)
+    a = a - a.mean()
+    na = np.sqrt((a * a).sum()) or 1.0
+    r = max(1, int(SUCHFENSTER * max(breite, hoehe) / f))
+    beste = (0, 0, -1.0)
+    for oy in range(-r, r + 1):
+        for ox in range(-r, r + 1):
+            ya, xa = p[1] + oy, p[0] + ox
+            if ya < 0 or xa < 0 or ya + a.shape[0] > b.shape[0] or xa + a.shape[1] > b.shape[1]:
+                continue
+            w = b[ya:ya + a.shape[0], xa:xa + a.shape[1]]
+            w = w - w.mean()
+            wert = float((a * w).sum() / (na * (np.sqrt((w * w).sum()) or 1.0)))
+            if wert > beste[2]:
+                beste = (ox * f, oy * f, wert)
+    return beste
+
+
+def bewahren(original: Image.Image, maske: Image.Image, variante: Image.Image,
+             licht: bool = True) -> tuple[Image.Image, list, float]:
+    """Den gemalten Bereich aus dem Original in die Variante setzen.
+
+    Zurueck: das Bild, die Box des eingesetzten Bereichs (in Pixeln der
+    Variante) und die Guete der Ausrichtung.
+
+    `licht` gleicht die Helligkeit an die Variante an -- sonst stuende eine
+    taghelle Kupplung in einer Neonnacht. Gemessen wird die Helligkeit des
+    ganzen Bildes, nicht die Umgebung der Maske: die Umgebung ist das Auto,
+    und das wechselt ja absichtlich die Farbe. Begrenzt auf 0,6 bis 1,4.
+    """
+    from PIL import ImageFilter, ImageStat
+    variante = variante.convert("RGB")
+    if original.size != variante.size:
+        original = original.resize(variante.size, Image.LANCZOS)
+        maske = maske.resize(variante.size, Image.NEAREST)
+    dx, dy, guete = ausrichten(original, maske, variante)
+    quelle = Image.new("RGB", variante.size)
+    quelle.paste(original.convert("RGB"), (dx, dy))
+    lage = Image.new("L", variante.size, 0)
+    lage.paste(maske, (dx, dy))
+    if licht:
+        hell = (ImageStat.Stat(variante.convert("L")).mean[0]
+                / max(1.0, ImageStat.Stat(original.convert("L")).mean[0]))
+        hell = max(0.6, min(1.4, hell))
+        quelle = quelle.point(lambda v: min(255, round(v * hell)))
+    # Weich ausblenden, aber nach innen: der Rand der Maske soll nicht ein
+    # Stueck des alten Autos mitnehmen.
+    kante = max(1, round(0.004 * max(variante.size)))
+    weich = lage.filter(ImageFilter.MinFilter(2 * kante + 1)).filter(
+        ImageFilter.GaussianBlur(kante))
+    fertig = variante.copy()
+    fertig.paste(quelle, (0, 0), weich)
+    box = lage.getbbox()
+    return fertig, [box[0], box[1], box[2], box[3]], round(guete, 3)
+
+
 def verkleinert(bild: Image.Image, kante: int) -> Image.Image:
     """Hoechstens `kante` gross -- etwa damit das Sprachmodell nicht ein
     2048er Foto ansehen muss, um es in zwei Saetzen zu beschreiben."""

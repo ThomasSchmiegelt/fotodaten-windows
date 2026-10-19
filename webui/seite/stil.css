@@ -602,3 +602,26 @@
 .fdwerte a { margin-right: 4px; }
 .fdwert { display: inline-flex; align-items: center; gap: 4px; margin: 0; font-weight: normal; }
 .fdwert input { width: auto; margin: 0; }
+
+/* Grosser Editor: fuellt das Fenster, das Bild darin zoom- und verschiebbar. */
+.ededitor { position: fixed; inset: 10px; z-index: 60; display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .5); padding: 8px; gap: 6px; }
+.edleiste { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.edgruppe { display: inline-flex; align-items: center; gap: 4px; }
+.edrechts { margin-left: auto; }
+.edleiste button { width: auto; padding: 5px 10px; font-size: 13px; }
+.edleiste button.an { outline: 2px solid var(--accent); }
+.edleiste .edfertig { background: var(--accent); color: #fff; }
+.edgroesse { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; }
+.edgroesse input { width: 140px; margin: 0; }
+.edhinweis { margin: 0; }
+.edflaeche { flex: 1; overflow: auto; background: var(--sunk); border-radius: 6px; position: relative; }
+.edinnen { position: relative; margin: 4px; line-height: 0; cursor: crosshair; user-select: none; touch-action: none; }
+.edinnen img, .edinnen canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.edinnen canvas { opacity: .45; }
+.edzeiger { position: absolute; border: 1px solid #fff; outline: 1px solid #000; border-radius: 50%;
+  pointer-events: none; display: none; }
+/* Die gemalte Maske ueber dem Vorschaubild einer Fotokachel. */
+.dsflaeche .fdmaske { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: .45;
+  pointer-events: none; }

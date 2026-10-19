@@ -3608,8 +3608,10 @@ function datensatzZeigen() {
       <figcaption>
         ${gruende ? `<span class="dsgrund">${esc(gruende)}</span><br>` : ""}
         IoU VL/DINO ${e.ueberein ?? "—"}${e.basis_iou != null ? ` · Basis ${e.basis_iou}` : ""}
-        ${e.von_hand ? " · von Hand" : ""}<br>
+        ${e.von_hand ? " · von Hand" : ""}
+        ${e.aus_maske ? ` · Objekt aus dem Original eingesetzt (Lage ${e.lage})` : ""}<br>
         <span title="${esc(e.prompt || "")}">${esc(achsen || e.datei)}</span><br>
+        <a href="#" onclick="dsGross('${esc(e.datei)}');return false">⤢ groß</a>
         ${e.status !== "ok" ? `<a href="#" onclick="dsSetzen('${esc(e.datei)}','ok');return false">✓ aufnehmen</a>` : ""}
         ${e.status !== "pruefen" ? `<a href="#" onclick="dsSetzen('${esc(e.datei)}','pruefen');return false">zurück auf prüfen</a>` : ""}
         ${e.status !== "verworfen" ? `<a href="#" onclick="dsSetzen('${esc(e.datei)}','verworfen');return false">✗ verwerfen</a>` : ""}
@@ -3650,6 +3652,17 @@ function dsZiehen(ev, datei) {
   };
   document.addEventListener("mousemove", weiter);
   document.addEventListener("mouseup", ende);
+}
+
+// Die Box im grossen Editor ziehen -- in der Kachel ist eine Kupplung zu
+// klein, um sie genau zu umranden. Uebernommen wird sie wie eine in der
+// Kachel gezogene: gruen, und "aufnehmen" speichert sie.
+function dsGross(datei) {
+  const e = DATENSATZ.find(x => x.datei === datei);
+  editorOeffnen({bild: `/datensatz/${DSPROJEKT}/${e.status}/${datei}`,
+    breite: e.breite, hoehe: e.hoehe, box: DSNEU[datei] || e.box, modi: ["box"],
+    hinweis: "Box um das Objekt ziehen, dann Übernehmen und in der Liste ✓ aufnehmen.",
+    fertig: (_, box) => { if (box) DSNEU[datei] = box; datensatzZeigen(); }});
 }
 
 async function dsSetzen(datei, status) {
@@ -3918,14 +3931,28 @@ function fdFotosZeigen() {
     return `<figure class="dsbild">
       <div class="dsflaeche" onmousedown="fdZiehen(event, ${i})">
         <img src="${f.bild}" draggable="false" alt="">
+        ${f.maske ? `<img class="fdmaske" src="${f.maske}" alt="">` : ""}
         ${dsRahmen(f.box, e, "dsbox dsneu")}
       </div>
       <figcaption>${esc(f.name)} · ${f.groesse[0]}×${f.groesse[1]}<br>
-        ${f.box ? "Box von Hand" : "<i>ohne Box — der Erkenner sucht sie</i>"}
+        <a href="#" onclick="fdEditor(${i});return false"><b>⤢ ausmalen</b></a>
+        ${f.maske ? "· Bereich bewahrt" : ""}
+        ${f.maske ? `<a href="#" onclick="FDFOTOS[${i}].maske=null;fdFotosZeigen();return false">Maske weg</a>` : ""}<br>
+        ${f.box ? "Box gesetzt" : f.maske ? "<i>Box kommt aus der Maske</i>"
+                 : "<i>ohne Box — der Erkenner sucht sie</i>"}
         ${f.box ? `<a href="#" onclick="FDFOTOS[${i}].box=null;fdFotosZeigen();return false">Box weg</a>` : ""}
         <a href="#" onclick="FDFOTOS.splice(${i},1);fdFotosZeigen();fdPlan();return false">entfernen</a>
       </figcaption></figure>`;
   }).join("");
+}
+
+function fdEditor(i) {
+  const f = FDFOTOS[i];
+  editorOeffnen({bild: f.bild, breite: f.groesse[0], hoehe: f.groesse[1],
+    maske: f.maske, box: f.box, modi: ["pinsel", "radierer", "box"],
+    hinweis: "Nur das Objekt ausmalen, das unverändert bleiben soll — nicht das Auto "
+      + "daneben. Strg+Mausrad zoomt. Die Box ist optional: ohne sie gilt die Maske.",
+    fertig: (maske, box) => { f.maske = maske; f.box = box; fdFotosZeigen(); }});
 }
 
 function fdZiehen(ev, i) {
@@ -3972,12 +3999,194 @@ async function fdStarten() {
     keep: $("fdKeep").value.trim(), paint_target: $("fdZiel").value.trim(),
     steps: parseInt($("fdSchritte").value, 10) || 30,
     base: parseInt($("fdBase").value, 10) || 1024,
-    original: $("fdOriginal").checked, labeln: $("fdLabeln").checked});
+    original: $("fdOriginal").checked, labeln: $("fdLabeln").checked,
+    bewahren: $("fdBewahren").checked, licht: $("fdLicht").checked});
   if (!res) { if (!laeuftSchon) buttonState("idle"); return; }
   say(`Eingereiht: ${res.bilder} Varianten aus ${FDFOTOS.length} Foto(s) …`, "ok");
   if (!laeuftSchon) paintSeries([], Math.min(res.bilder, 60), 1);
   poll();
 }
+
+// ---------- Grosser Editor: Bereich bewahren, Box ziehen, mit Zoom ----------
+// Eine Anhaengerkupplung ist auf einem ganzen Foto winzig -- in der Kachel
+// laesst sie sich weder genau umranden noch ausmalen. Der Editor zeigt das
+// Bild in voller Fenstergroesse, zoomt bis 800 % und rechnet alles in
+// Pixeln des Originals. Fotodaten nutzt Pinsel, Radierer und Box, der
+// Datensatz nur die Box.
+let ED = null;
+
+function editorOeffnen(o) {
+  const groesse = Math.max(3, Math.round(Math.max(o.breite, o.hoehe) / 120));
+  ED = Object.assign({zoom: 1, pinsel: groesse, gemalt: !!o.maske}, o,
+                     {box: o.box ? o.box.slice() : null, modus: o.modi[0]});
+  const c = $("edMaske");
+  c.width = o.breite; c.height = o.hoehe;
+  const ctx = c.getContext("2d");
+  ctx.clearRect(0, 0, c.width, c.height);
+  if (o.maske) {
+    const m = new Image();
+    m.onload = () => ctx.drawImage(m, 0, 0, o.breite, o.hoehe);
+    m.src = o.maske;
+  }
+  ["pinsel", "radierer"].forEach(m =>
+    $(m === "pinsel" ? "edPinsel" : "edRadierer").style.display = o.modi.includes(m) ? "" : "none");
+  $("edBoxModus").style.display = o.modi.includes("box") ? "" : "none";
+  $("edGroesseZeile").style.display = o.modi.includes("pinsel") ? "" : "none";
+  $("edLeeren").style.display = o.modi.includes("pinsel") ? "" : "none";
+  $("edGroesse").max = Math.max(60, Math.round(Math.max(o.breite, o.hoehe) / 8));
+  $("edGroesse").value = ED.pinsel;
+  $("edHinweis").textContent = o.hinweis || "";
+  $("edBild").src = o.bild;
+  $("edEditor").style.display = "flex";
+  editorModus(ED.modus);
+  editorGroesse();
+  requestAnimationFrame(editorEinpassen);
+}
+
+function editorModus(m) {
+  ED.modus = m;
+  document.querySelectorAll("#edEditor [data-modus]").forEach(
+    b => b.classList.toggle("an", b.dataset.modus === m));
+}
+
+function editorGroesse() {
+  ED.pinsel = parseInt($("edGroesse").value, 10) || ED.pinsel;
+  $("edGroesseText").textContent = ED.pinsel + " px";
+}
+
+function editorZoom(z, mitte) {
+  const f = $("edFlaeche");
+  // Den Punkt unter der Maus (oder die Mitte) festhalten, waehrend gezoomt wird.
+  const r = f.getBoundingClientRect();
+  const px = mitte ? mitte[0] - r.left : f.clientWidth / 2;
+  const py = mitte ? mitte[1] - r.top : f.clientHeight / 2;
+  const bx = (f.scrollLeft + px) / ED.zoom, by = (f.scrollTop + py) / ED.zoom;
+  ED.zoom = Math.max(0.05, Math.min(8, z));
+  $("edInnen").style.width = ED.breite * ED.zoom + "px";
+  $("edInnen").style.height = ED.hoehe * ED.zoom + "px";
+  $("edZoomText").textContent = Math.round(ED.zoom * 100) + "%";
+  f.scrollLeft = bx * ED.zoom - px;
+  f.scrollTop = by * ED.zoom - py;
+  editorBoxZeigen();
+}
+
+function editorEinpassen() {
+  const f = $("edFlaeche");
+  editorZoom(Math.min((f.clientWidth - 12) / ED.breite, (f.clientHeight - 12) / ED.hoehe));
+}
+
+function editorBoxZeigen() {
+  const b = ED.box, d = $("edBox");
+  d.style.display = b ? "block" : "none";
+  if (!b) return;
+  Object.assign(d.style, {left: 100 * b[0] / ED.breite + "%", top: 100 * b[1] / ED.hoehe + "%",
+    width: 100 * (b[2] - b[0]) / ED.breite + "%", height: 100 * (b[3] - b[1]) / ED.hoehe + "%"});
+}
+
+function editorPunkt(ev) {
+  const r = $("edInnen").getBoundingClientRect();
+  return [Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)) * ED.breite,
+          Math.max(0, Math.min(1, (ev.clientY - r.top) / r.height)) * ED.hoehe];
+}
+
+function editorStrich(von, nach) {
+  const ctx = $("edMaske").getContext("2d");
+  ctx.globalCompositeOperation = ED.modus === "radierer" ? "destination-out" : "source-over";
+  ctx.strokeStyle = ctx.fillStyle = "#00ff66";
+  ctx.lineWidth = ED.pinsel;
+  ctx.lineCap = ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(von[0], von[1]);
+  ctx.lineTo(nach[0] + 0.01, nach[1]);
+  ctx.stroke();
+  if (ED.modus === "pinsel") ED.gemalt = true;
+}
+
+$("edInnen").addEventListener("pointerdown", ev => {
+  if (!ED || ev.button !== 0) return;
+  ev.preventDefault();
+  $("edInnen").setPointerCapture(ev.pointerId);
+  const start = editorPunkt(ev);
+  let letzter = start;
+  if (ED.modus !== "box") editorStrich(start, start);
+  const weiter = m => {
+    const p = editorPunkt(m);
+    if (ED.modus === "box") {
+      ED.box = [Math.min(start[0], p[0]), Math.min(start[1], p[1]),
+                Math.max(start[0], p[0]), Math.max(start[1], p[1])].map(Math.round);
+      editorBoxZeigen();
+    } else {
+      editorStrich(letzter, p);
+      letzter = p;
+    }
+  };
+  const ende = () => {
+    $("edInnen").removeEventListener("pointermove", weiter);
+    $("edInnen").removeEventListener("pointerup", ende);
+    if (ED.modus === "box" && ED.box && (ED.box[2] - ED.box[0] < 3 || ED.box[3] - ED.box[1] < 3)) {
+      ED.box = null;
+      editorBoxZeigen();
+    }
+  };
+  $("edInnen").addEventListener("pointermove", weiter);
+  $("edInnen").addEventListener("pointerup", ende);
+});
+
+// Der Pinselkreis folgt der Maus -- man sieht vorher, was er trifft.
+$("edInnen").addEventListener("pointermove", ev => {
+  const z = $("edZeiger");
+  if (!ED || ED.modus === "box") { z.style.display = "none"; return; }
+  const r = $("edInnen").getBoundingClientRect(), d = ED.pinsel * ED.zoom;
+  Object.assign(z.style, {display: "block", width: d + "px", height: d + "px",
+    left: ev.clientX - r.left - d / 2 + "px", top: ev.clientY - r.top - d / 2 + "px"});
+});
+$("edInnen").addEventListener("pointerleave", () => { $("edZeiger").style.display = "none"; });
+
+$("edFlaeche").addEventListener("wheel", ev => {
+  if (!ED || !ev.ctrlKey) return;
+  ev.preventDefault();
+  editorZoom(ED.zoom * (ev.deltaY < 0 ? 1.25 : 0.8), [ev.clientX, ev.clientY]);
+}, {passive: false});
+
+$("edPinsel").onclick = () => editorModus("pinsel");
+$("edRadierer").onclick = () => editorModus("radierer");
+$("edBoxModus").onclick = () => editorModus("box");
+$("edGroesse").oninput = editorGroesse;
+$("edGroesser").onclick = () => editorZoom(ED.zoom * 1.25);
+$("edKleiner").onclick = () => editorZoom(ED.zoom * 0.8);
+$("edEinpassen").onclick = editorEinpassen;
+$("edEins").onclick = () => editorZoom(1);
+$("edLeeren").onclick = () => {
+  const c = $("edMaske");
+  c.getContext("2d").clearRect(0, 0, c.width, c.height);
+  ED.gemalt = false;
+};
+$("edBoxWeg").onclick = () => { ED.box = null; editorBoxZeigen(); };
+$("edAbbrechen").onclick = () => { $("edEditor").style.display = "none"; ED = null; };
+document.addEventListener("keydown", ev => {
+  if (ev.key === "Escape" && ED) $("edAbbrechen").onclick();
+});
+
+// Ist ueberhaupt etwas gemalt? Auf einer kleinen Kopie nachsehen -- ein
+// Handyfoto hat 12 Millionen Pixel, die muss man dafuer nicht alle lesen.
+function editorMaskeLeer() {
+  const k = document.createElement("canvas");
+  k.width = 256; k.height = Math.max(1, Math.round(256 * ED.hoehe / ED.breite));
+  const ctx = k.getContext("2d");
+  ctx.drawImage($("edMaske"), 0, 0, k.width, k.height);
+  const d = ctx.getImageData(0, 0, k.width, k.height).data;
+  for (let i = 3; i < d.length; i += 4) if (d[i] > 20) return false;
+  return true;
+}
+
+$("edFertig").onclick = () => {
+  const maske = ED.modi.includes("pinsel") && !editorMaskeLeer()
+    ? $("edMaske").toDataURL("image/png") : null;
+  const fertig = ED.fertig, box = ED.box;
+  $("edEditor").style.display = "none";
+  ED = null;
+  fertig(maske, box);
+};
 
 // ---------- Cloud-Modelle ----------
 // Sprach- und Bildmodell lassen sich einzeln auf eine OpenAI-kompatible

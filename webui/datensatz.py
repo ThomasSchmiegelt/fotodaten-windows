@@ -55,6 +55,9 @@ DINO_MODELL = os.environ.get("QWEN_BOX_PRUEFER", "IDEA-Research/grounding-dino-b
 GLEICH = 0.5
 # Eine DINO-Box, die mehr als die Haelfte des Bildes deckt, meint das Auto.
 ZU_GROSS = 0.5
+# Unter dieser Guete der Ausrichtung (fotodaten.ausrichten) kommt ein Bild
+# mit eingesetztem Bereich auf die Pruefliste.
+LAGE_SICHER = 0.35
 # Umschliesst eine DINO-Box die VL-Box und ist so viel groesser, zaehlt sie
 # als "das Ganze" und nicht als Teil des gesuchten Objekts.
 GANZES = 8
@@ -552,14 +555,20 @@ def aufnehmen_gruppen(projekt: str, gruppen: list[dict], klasse: str, suche: str
         for pfad, meta in g.get("bilder") or []:
             stapel.append((g, "variante", pfad, meta))
 
+    # Nicht zu erkennen ist, was seine Box schon hat: das Original mit Box von
+    # Hand, und Varianten, in die der gemalte Bereich eingesetzt wurde.
     zu_erkennen = [s for s in stapel
-                   if not (s[1] == "original" and s[0].get("basis_box"))]
-    erkenner = Erkenner(melden)
-    try:
-        vl, dino = erkenner.alle([s[2] for s in zu_erkennen], suche, melden) \
-            if zu_erkennen else ([], [])
-    finally:
-        erkenner.schliessen()
+                   if not (s[1] == "original" and s[0].get("basis_box"))
+                   and not s[3].get("box_bekannt")]
+    vl, dino = [], []
+    if zu_erkennen:
+        # Nur wenn wirklich etwas zu erkennen ist -- haben alle Bilder ihre
+        # Box schon (gemalter Bereich), braucht es weder Modelle noch torch.
+        erkenner = Erkenner(melden)
+        try:
+            vl, dino = erkenner.alle([s[2] for s in zu_erkennen], suche, melden)
+        finally:
+            erkenner.schliessen()
     gefunden = {id(s): (vl[i], dino[i]) for i, s in enumerate(zu_erkennen)}
 
     # Die Basisbox jeder Gruppe: von Hand, sonst was Qwen3-VL im Basisbild
@@ -579,7 +588,14 @@ def aufnehmen_gruppen(projekt: str, gruppen: list[dict], klasse: str, suche: str
             continue
         with Image.open(pfad) as roh:
             groesse = roh.size
-        if art == "original" and g.get("basis_box") and id(s) not in gefunden:
+        if meta.get("box_bekannt"):
+            # Eingesetzt wird nur bei sicherer Lage (auftraege.run_fotodaten),
+            # die Box ist also die der eingesetzten Originalpixel.
+            urteil = {"box": [round(v) for v in meta["box_bekannt"]], "vl": None,
+                      "dino": None, "dino_wert": 0.0, "ueberein": None,
+                      "basis_iou": None, "status": "ok", "gruende": [],
+                      "aus_maske": True, "lage": meta.get("lage")}
+        elif art == "original" and g.get("basis_box") and id(s) not in gefunden:
             urteil = {"box": [round(v) for v in g["basis_box"]], "vl": None,
                       "dino": None, "dino_wert": 0.0, "ueberein": None,
                       "basis_iou": None, "status": "ok", "gruende": [],

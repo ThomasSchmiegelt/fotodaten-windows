@@ -584,8 +584,34 @@ Box-Erkenner einmal für alles. Am Ende meldet die Statuszeile z. B.
 „Datensatz: 24 aufgenommen, 6 zu prüfen“. Weiter wie in Schritt 3
 (Prüfliste) und Schritt 4 (Training).
 
+**Was unverändert bleiben soll, ausmalen.** Eine Box um die Kupplung
+enthielte immer auch ein Stück Auto, und das soll sich ja ändern. Deshalb
+gibt es je Foto **⤢ ausmalen**: das Foto öffnet sich groß, mit Zoom
+(Knöpfe oder Strg+Mausrad), Pinsel, Radierer und Pinselgröße. Nur die
+Kupplung bemalen. Nach dem Erzeugen sucht das Programm, wo die Kupplung in
+der Variante sitzt, und setzt dort genau die gemalten Pixel aus dem Original
+ein — mit weicher Kante, ans neue Licht angeglichen. Die Box ergibt sich dann
+exakt aus der Maske, ohne Erkenner.
+
+Eingesetzt wird nur, wenn die Stelle sicher gefunden ist (Güte ab 0,35).
+Hat das Bildmodell das Objekt woanders hingemalt, stünden danach zwei
+Kupplungen im Bild; dann bleibt die Variante, wie sie ist, und die Erkenner
+setzen die Box. Gemessen:
+
+| Bildmodell | Lage gefunden | Ergebnis |
+|---|---|---|
+| Qwen-Image lokal (3090) | Güte 0,5–0,9, außer bei gewürfelter Kameraposition | echte Kupplung nahtlos eingesetzt |
+| Z Image Turbo (franconia.ai) | Güte 0,2–0,4 | zeichnet die Kupplung an anderer Stelle und Größe neu; eingesetzt wird nichts |
+
+franconia.ai nimmt außerdem keine Inpainting-Maske an (geprüft: mit und ohne
+`mask` kommt bei gleichem Seed dasselbe Bild). **Soll die echte Kupplung
+erhalten bleiben, die Varianten also mit Qwen-Image auf der großen Karte
+rechnen** (Cloud-Modelle › Bildmodell: Haken „Cloud statt lokal“ weg).
+
 **Gut zu wissen**
 
+- Im Reiter **Datensatz** lässt sich jedes Bild über **⤢ groß** im selben
+  Editor öffnen und die Box dort genau ziehen; danach ✓ aufnehmen.
 - **Handyfotos** werden nach ihrem EXIF-Vermerk aufgerichtet, so wie der
   Browser sie zeigt. Große Fotos werden auf 2048 px verkleinert.
 - Original und Varianten eines Fotos heißen `<Zeit>_fotoNN_…` und bleiben

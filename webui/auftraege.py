@@ -605,6 +605,12 @@ def run_fotodaten(params: dict) -> None:
             bild = fotodaten.vorbereiten(decode(foto["bild"]))
             anzeige = foto.get("groesse") or bild.size
             box = fotodaten.box_umrechnen(foto.get("box"), tuple(anzeige), bild.size)
+            # Der gemalte Bereich, der unveraendert bleiben soll. Ohne
+            # gezogene Box ist er zugleich die Box des Originals -- genauer
+            # als jede Hand.
+            maske = fotodaten.maske_lesen(decode(foto["maske"]), bild.size)                 if foto.get("maske") else None
+            if maske is not None and not box:
+                box = list(maske.getbbox())
             name_original = None
             if params.get("original", True):
                 # Nummer 00 vor den Varianten: so steht das Original in der
@@ -620,8 +626,21 @@ def run_fotodaten(params: dict) -> None:
                                         seed + nr, subject)
             entstanden = []
 
-            def on_image(meta, image, _kind=kind, _liste=entstanden):
+            def on_image(meta, image, _kind=kind, _liste=entstanden, _maske=maske,
+                         _bild=bild):
                 meta = dict(meta, foto=_kind)
+                if _maske is not None and params.get("bewahren", True):
+                    # Die Originalpixel zurueck -- siehe fotodaten.bewahren.
+                    # Nur wenn die Stelle sicher gefunden ist: hat das
+                    # Bildmodell das Objekt woanders hingemalt (gemessen bei
+                    # Z Image Turbo und bei gewuerfelter Kameraposition),
+                    # stuenden danach zwei Kupplungen im Bild. Dann bleibt
+                    # die Variante, wie sie ist, und die Erkenner suchen.
+                    neu, box_neu, lage = fotodaten.bewahren(
+                        _bild, _maske, image, licht=params.get("licht", True))
+                    meta["lage"] = lage
+                    if lage >= datensatz.LAGE_SICHER:
+                        image, meta["box_bekannt"] = neu, box_neu
                 name = _save(meta, image, stamp, _kind)
                 current["files"].append(name)
                 _liste.append((os.path.join(ziel(), name), meta))
