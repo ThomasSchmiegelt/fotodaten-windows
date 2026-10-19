@@ -752,11 +752,22 @@ Z Image Turbo ist ein Text-zu-Bild-Modell und arbeitet mit Vorlage als
 *Beschreibungen*, beschreibt das Sprachmodell jedes Foto einmal, und das
 Bildmodell bekommt das Zielbild in Worten („a vintage station wagon seen
 from behind …, the car body is bright red, standing on a gravel yard“). Die
-**Stärke** sagt, wie weit es sich von der Vorlage entfernen darf: um 0,4
-wechseln Farbe und Licht, ab 0,7 auch der Untergrund — dann verschieben sich
-eher die Umrisse, und die Box-Erkenner schicken mehr Bilder auf die
-Prüfliste. Die Kameraposition ändert img2img praktisch nicht; dafür Fotos
-aus verschiedenen Winkeln mitbringen.
+**Stärke** sagt, wie weit es sich von der Vorlage entfernen darf. Gemessen
+mit Z Image Turbo am Auto-Heck: unter 0,7 ändert sich kaum etwas, bei **0,7**
+(Vorgabe) wechseln Farbe und Untergrund bei gleichem Aufbau, ab 0,8 wird es
+ein anderes Fahrzeug. Von der Fotobeschreibung geht nur der erste Satz mit,
+und die Farbe steht vorn — sonst überstimmt die Beschreibung die Farbe.
+
+**Was Z Image Turbo kann und was nicht** (Testlauf, 2 Fotos, 22 Varianten,
+rund eine Minute): Schwarz, Silber, Gelb, Schnee und Schotter greifen; Rot
+blieb je nach Seed blass; Licht ist nur angedeutet. Die Kameraposition ändert
+img2img praktisch nicht — dafür Fotos aus verschiedenen Winkeln mitbringen.
+Und: das Modell zeichnet das ganze Bild neu, auch das Objekt. Die Kupplung
+sieht danach jedes Mal etwas anders aus, und bei einer Nahaufnahme färbt die
+Farbachse die Kupplung selbst um. Die Boxen stimmen trotzdem, sie werden ja
+neu gesucht. Wer die Varianten nah am echten Objekt braucht, rechnet sie mit
+Qwen-Image auf einer großen Karte (`einrichten.bat lokal`) — das ändert auf
+Anweisung nur, was es soll.
 
 Bei franconia.ai gehen **Seed und Schritte** mit, Cloud-Bilder sind dort also
 wiederholbar. Vorlagen werden auf Kanten in Vielfachen von 16 gebracht (die

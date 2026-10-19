@@ -309,14 +309,28 @@ class Engine:
         Bilddaten, wirkt aber nicht: die Schnittstelle kennt keinen.
         """
         results = []
+        # Faellt ein Bild trotz Wiederholungen aus, geht es mit dem naechsten
+        # weiter -- bei einer Serie von hundert Varianten soll ein Aussetzer
+        # des Anbieters nicht alles kosten. Erst drei Ausfaelle in Folge
+        # heissen: der Dienst ist weg, dann wird abgebrochen.
+        in_folge, ausgefallen = 0, 0
         for index, job in enumerate(jobs, start=1):
             if self._cancel:
                 break
             self._set(state="denoising", image=index, step=0, total=1,
-                      message=f"Bild {index}/{len(jobs)} · Cloud-Modell rechnet")
+                      message=f"Bild {index}/{len(jobs)} · Cloud-Modell rechnet"
+                      + (f" · {ausgefallen} ausgefallen" if ausgefallen else ""))
             prompt = job.get("prompt_cloud") or job["prompt"]
-            image_out = cloud.bild(prompt, width, height, images or None,
-                                   seed=job.get("seed"), schritte=steps)
+            try:
+                image_out = cloud.bild(prompt, width, height, images or None,
+                                       seed=job.get("seed"), schritte=steps)
+            except RuntimeError:
+                in_folge += 1
+                ausgefallen += 1
+                if in_folge >= 3:
+                    raise
+                continue
+            in_folge = 0
             meta = {k: v for k, v in job.items() if k not in ("embeds", "prompt_cloud")}
             meta["prompt"] = prompt
             meta.update(index=index, effect=effect, form=form, cloud=True)
@@ -627,8 +641,13 @@ class Engine:
                 # -- es malt, was dasteht. Also das Zielbild beschreiben: was
                 # im Foto ist, was bleiben soll, und die Achsen dieses Bildes.
                 # Die Geometrie haelt die Vorlage selbst fest.
+                # Von der Fotobeschreibung nur der erste Satz: Motiv und
+                # Blickrichtung. Gemessen: vier Saetze des Sprachmodells
+                # ueberstimmten die Farbe -- "rot" blieb beige, mit einem
+                # Satz wurde es rot. Den Rest haelt die Vorlage ohnehin fest.
+                erster = re.split(r"(?<=[.!?])\s+", (beschreibung or prompt or "").strip())[0]
                 grund = " ".join(t.strip().rstrip(".") + "." for t in
-                                 (beschreibung or prompt, keep) if t and t.strip())
+                                 (erster, keep) if t and t.strip())
                 for job in jobs:
                     picks = {k: _axis(job.get(k)) for k in
                              ("view", "style", "light", "camera", "paint", "palette",
@@ -638,8 +657,18 @@ class Engine:
                     # stehen: "a beige station wagon ... the car body is
                     # bright red" malt ein img2img-Modell als beides.
                     text = _ohne_farben(grund) if picks["paint"] else grund
-                    job["prompt_cloud"] = build_prompt(text, paint_target=paint_target,
-                                                       **picks)
+                    # Die Achsen VOR die Beschreibung: das Modell gewichtet den
+                    # Anfang. Die Farbe dabei ausdruecklich -- "the car body is
+                    # bright red" allein wirkte kaum, "bright red paint covers
+                    # the car body" schon.
+                    farbe = ""
+                    if picks["paint"] in PAINTS and paint_target.strip():
+                        ton, ziel = PAINTS[picks["paint"]][1], paint_target.strip()
+                        farbe = f"{ton} paint covers {ziel}, {ziel} is {ton}"
+                    achsen = build_prompt("", paint_target=paint_target,
+                                          **dict(picks, paint=None)).strip(" ,")
+                    vorn = ", ".join(t for t in (farbe, achsen) if t)
+                    job["prompt_cloud"] = f"{vorn}. {text}" if vorn else text
             return self._aus_der_cloud(jobs, images, width, height, effect,
                                        form, on_image, steps)
         if not LOKAL:

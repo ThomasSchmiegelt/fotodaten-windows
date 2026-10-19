@@ -4063,6 +4063,7 @@ function cloudVorlage(name) {
   });
   $("cloud_bild_groesse").value = v.groesse;
   $("cloud_bild_art").value = v.art;
+  if (v.staerke) $("cloud_bild_staerke").value = v.staerke;
   say(`${v.label} eingetragen — Schlüssel ergänzen und speichern.`, "ok");
 }
 

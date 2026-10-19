@@ -47,7 +47,7 @@ VORLAGE_KANTE = 1536
 VORLAGEN = {
     "franconia": {"label": "franconia.ai", "url": "https://api.franconia.ai/v1",
                   "sprache": "Qwen 3.8 27B", "bild": "Z Image Turbo",
-                  "groesse": "genau", "art": "beschreibung"},
+                  "groesse": "genau", "art": "beschreibung", "staerke": 0.7},
     "openai": {"label": "OpenAI", "url": "https://api.openai.com/v1",
                "sprache": "gpt-4.1-mini", "bild": "gpt-image-1",
                "groesse": "openai", "art": "anweisung"},
@@ -148,8 +148,16 @@ def aktiv(platz: str) -> dict | None:
 
 
 # --- Aufruf --------------------------------------------------------------
-def _anfrage(e: dict, pfad: str, daten: bytes, art: str, timeout: int) -> dict:
-    """Ein POST an den Anbieter. Fehler kommen als RuntimeError mit Klartext."""
+# Wie oft ein Aufruf wiederholt wird, wenn der Anbieter ausfaellt oder
+# drosselt, und wie lange dazwischen gewartet wird (Sekunden). Gemessen an
+# franconia.ai: mitten in einer Serie antwortete der Dienst eine Weile gar
+# nicht -- ohne Wiederholung brach daran der ganze Auftrag ab.
+WARTEN = (5, 15, 40)
+VORUEBERGEHEND = (429, 502, 503, 504)
+
+
+def _einmal(e: dict, pfad: str, daten: bytes, art: str, timeout: int) -> dict:
+    """Ein POST. Fehler als RuntimeError; .warten sagt, ob ein neuer Versuch lohnt."""
     kopf = {"Content-Type": art}
     if e.get("schluessel"):
         kopf["Authorization"] = f"Bearer {e['schluessel']}"
@@ -163,11 +171,46 @@ def _anfrage(e: dict, pfad: str, daten: bytes, art: str, timeout: int) -> dict:
             text = json.loads(text)["error"]["message"]
         except (ValueError, KeyError, TypeError):
             pass
-        raise RuntimeError(f"Cloud-Modell meldet {fehler.code}: {str(text)[:300]}")
+        neu = RuntimeError(f"Cloud-Modell meldet {fehler.code}: {str(text)[:300]}")
+        if fehler.code in VORUEBERGEHEND:
+            # Bei 429 sagt der Anbieter selbst, wann es wieder geht.
+            try:
+                neu.warten = float(fehler.headers.get("Retry-After") or 0) or True
+            except ValueError:
+                neu.warten = True
+        raise neu
     except urllib.error.URLError as fehler:
-        raise RuntimeError(f"Kein Kontakt zu {e['url']} ({fehler.reason})")
-    except TimeoutError:
-        raise RuntimeError(f"{e['url']} antwortet nicht innerhalb von {timeout} s")
+        neu = RuntimeError(f"Kein Kontakt zu {e['url']} ({fehler.reason})")
+        neu.warten = True
+        raise neu
+    except (TimeoutError, ConnectionError) as fehler:
+        neu = RuntimeError(f"{e['url']} antwortet nicht innerhalb von {timeout} s"
+                           if isinstance(fehler, TimeoutError)
+                           else f"Verbindung zu {e['url']} abgebrochen ({fehler})")
+        neu.warten = True
+        raise neu
+
+
+def _anfrage(e: dict, pfad: str, daten: bytes, art: str, timeout: int) -> dict:
+    """Ein POST an den Anbieter, mit Wiederholung bei voruebergehenden Fehlern.
+
+    Wiederholt wird bei Zeitueberschreitung, abgebrochener Verbindung, 429
+    (Anfragelimit) und 502/503/504 (Modell gerade nicht da). Ein 400 oder 401
+    wird nicht besser, wenn man es noch einmal versucht -- der kommt sofort.
+    """
+    import sys
+    import time
+    for versuch, pause in enumerate((*WARTEN, None), start=1):
+        try:
+            return _einmal(e, pfad, daten, art, timeout)
+        except RuntimeError as fehler:
+            warten = getattr(fehler, "warten", None)
+            if not warten or pause is None:
+                raise
+            pause = warten if isinstance(warten, float) else pause
+            print(f"Cloud: {fehler} -- neuer Versuch {versuch + 1} in {pause:.0f} s",
+                  file=sys.stderr, flush=True)
+            time.sleep(pause)
 
 
 def _bildart(b64: str) -> str:

@@ -1469,8 +1469,35 @@ class Handler(BaseHTTPRequestHandler):
                                 "nummern": nummern})
 
 
+class _Server(ThreadingHTTPServer):
+    """Unter Windows den Port fuer sich allein.
+
+    Python setzt SO_REUSEADDR. Unter Linux verhindert das einen zweiten
+    Start trotzdem, unter Windows aber erlaubt es mehreren Prozessen
+    denselben Port -- die Anfragen landen dann mal hier, mal dort. Gemessen:
+    ein Auftrag lief im alten Server mit altem Code, waehrend der neue nichts
+    davon wusste. SO_EXCLUSIVEADDRUSE macht den zweiten Start zu einem
+    klaren Fehler.
+    """
+
+    allow_reuse_address = not WINDOWS
+
+    def server_bind(self):
+        if WINDOWS:
+            import socket
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def main():
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    try:
+        server = _Server((HOST, PORT), Handler)
+    except OSError as fehler:
+        print(f"Port {PORT} ist belegt -- laeuft schon ein Server? Dann einfach "
+              f"http://{HOST.replace('0.0.0.0', '127.0.0.1')}:{PORT} oeffnen, "
+              f"oder mit einem anderen Port starten: start.bat 7861\n({fehler})",
+              file=sys.stderr)
+        sys.exit(1)
     print(f"Qwen-Image WebUI laeuft auf http://{HOST}:{PORT}  (Strg+C zum Beenden)")
     print(f"Bilder landen in {projekte.bilder(projekte.aktiv())}")
     try:
