@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Startet die Qwen-Image-2.1 Weboberflaeche und oeffnet den Browser.
+# Startet Bildermacher 1.0 und oeffnet den Browser.
 #
 #   ./start.sh            -> http://127.0.0.1:7860
 #   ./start.sh 8080       -> anderer Port

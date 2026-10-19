@@ -1,4 +1,6 @@
-# Qwen-Image 2.1 — lokale Weboberfläche und GIMP-Anbindung
+# Bildermacher 1.0 — lokale Weboberfläche und GIMP-Anbindung für Qwen-Image 2.1
+
+Von **Thomas Schmiegelt**.
 
 Text zu Bild, Bildbearbeitung, Gruppenbilder und Serien mit
 [Qwen-Image 2.1](https://huggingface.co/Qwen/Qwen-Image-2.1) — auf dem eigenen

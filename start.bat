@@ -1,5 +1,5 @@
 @echo off
-rem Startet die Weboberflaeche und oeffnet den Browser.
+rem Startet Bildermacher 1.0 und oeffnet den Browser.
 rem
 rem   start.bat               -> http://127.0.0.1:7860
 rem   start.bat 8080          -> anderer Port

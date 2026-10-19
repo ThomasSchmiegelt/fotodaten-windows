@@ -1502,7 +1502,7 @@ def main():
               f"oder mit einem anderen Port starten: start.bat 7861\n({fehler})",
               file=sys.stderr)
         sys.exit(1)
-    print(f"Qwen-Image WebUI laeuft auf http://{HOST}:{PORT}  (Strg+C zum Beenden)")
+    print(f"Bildermacher 1.0 von Thomas Schmiegelt laeuft auf http://{HOST}:{PORT}  (Strg+C zum Beenden)")
     print(f"Bilder landen in {projekte.bilder(projekte.aktiv())}")
     try:
         server.serve_forever()
