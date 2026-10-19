@@ -594,3 +594,11 @@
 #retRahmen { position: absolute; display: none; pointer-events: none;
              border: 1.5px dashed #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.5); }
 .retvorlagen { font-size: 12px; margin: 2px 0 6px; }
+
+/* Fotodaten: je Achse ein Haken, darunter ihre Werte zum Abwaehlen. */
+.fdachse { border-bottom: 1px solid var(--line); padding: 6px 0; }
+.fdachse .hint { margin-left: 6px; }
+.fdwerte { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 4px 0 2px 24px; font-size: 12.5px; }
+.fdwerte a { margin-right: 4px; }
+.fdwert { display: inline-flex; align-items: center; gap: 4px; margin: 0; font-weight: normal; }
+.fdwert input { width: auto; margin: 0; }

@@ -35,15 +35,51 @@ import projekte
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 SKRIPT = os.path.join(HIER, "detektor_lauf.py")
+YOLO_SKRIPT = os.path.join(HIER, "yolo_lauf.py")
 
 MODELLE = {"dfine-nano": ("ustc-community/dfine-nano-coco",
                           "Nano -- schnell, fuer den Anfang"),
            "dfine-small": ("ustc-community/dfine-small-coco",
                            "Small -- genauer, rund doppelt so lange"),
            "dfine-medium": ("ustc-community/dfine-medium-coco",
-                            "Medium -- noch genauer, braucht viele Bilder")}
-LAUF = re.compile(r"\d{8}-\d{6}_dfine-(?:nano|small|medium)")
+                            "Medium -- noch genauer, braucht viele Bilder"),
+           # YOLO26 von Ultralytics, auf Wunsch. AGPL-3.0, und Ultralytics
+           # zaehlt die trainierten Gewichte mit dazu -- fuer eigene Versuche
+           # gleichgueltig, fuer ein weitergegebenes Modell nicht. Auf einer
+           # 6-GB-Karte gehen n und s bequem, m bei 640 px knapp.
+           "yolo26n": ("yolo26n.pt", "YOLO26 Nano -- schnell, 6 GB reichen (AGPL)"),
+           "yolo26s": ("yolo26s.pt", "YOLO26 Small -- genauer, 6 GB reichen (AGPL)"),
+           "yolo26m": ("yolo26m.pt", "YOLO26 Medium -- ab einigen hundert Bildern (AGPL)")}
+LAUF = re.compile(r"\d{8}-\d{6}_(?:dfine-(?:nano|small|medium)|yolo26[nsm])")
 BILD = re.compile(r"[\w.\-]+\.(?:png|jpg)")
+
+
+def _ist_yolo(name: str) -> bool:
+    return "yolo" in name
+
+
+def _hat_gewichte(gewichte: str) -> bool:
+    """D-FINE legt einen Hugging-Face-Ordner ab, YOLO eine best.pt."""
+    return (os.path.isfile(os.path.join(gewichte, "config.json"))
+            or os.path.isfile(os.path.join(gewichte, "best.pt")))
+
+
+def _beenden(prozess) -> None:
+    """Den Trainingsprozess samt seiner Lader-Prozesse beenden.
+
+    Unter Windows erreicht terminate() nur den Hauptprozess; die Lader
+    liefen weiter und hielten Speicher fest. taskkill /T nimmt den ganzen
+    Baum.
+    """
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(prozess.pid)],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        prozess.terminate()
+    try:
+        prozess.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        prozess.kill()
 
 
 def ordner(projekt: str) -> str:
@@ -135,15 +171,13 @@ def trainieren(projekt: str, modell: str, epochen: int, bildgroesse: int,
 
     protokoll = os.path.join(ziel, "protokoll.txt")
     with open(protokoll, "w", encoding="utf-8") as log:
-        prozess = subprocess.Popen([sys.executable, SKRIPT, "trainieren", auftrag],
-                                   cwd=HIER, stdout=log, stderr=subprocess.STDOUT)
+        skript = YOLO_SKRIPT if _ist_yolo(modell) else SKRIPT
+        prozess = subprocess.Popen([sys.executable, skript, "trainieren", auftrag],
+                                   cwd=HIER, stdout=log, stderr=subprocess.STDOUT,
+                                   env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         while prozess.poll() is None:
             if abbrechen():
-                prozess.terminate()
-                try:
-                    prozess.wait(timeout=30)
-                except subprocess.TimeoutExpired:
-                    prozess.kill()
+                _beenden(prozess)
                 break
             zeilen = _ergebnisse(os.path.join(ziel, "ergebnisse.csv"))
             if zeilen:
@@ -172,7 +206,8 @@ def _zahl(text) -> float:
 def _ergebnisse(pfad: str) -> list[dict]:
     try:
         with open(pfad, encoding="utf-8") as fh:
-            roh = list(csv.DictReader(fh))
+            roh = [{(k or "").strip(): v for k, v in z.items()}
+                   for z in csv.DictReader(fh)]
     except OSError:
         return []
     return [{"epoche": int(_zahl(z.get("epoch"))),
@@ -201,8 +236,7 @@ def laeufe(projekt: str) -> list[dict]:
             "name": name, "zeilen": zeilen,
             "beste": max(zeilen, key=lambda z: z["map50_95"]) if zeilen else None,
             "einstellungen": einstellungen,
-            "gewichte": gewichte if os.path.isfile(
-                os.path.join(gewichte, "config.json")) else "",
+            "gewichte": gewichte if _hat_gewichte(gewichte) else "",
             "bilder": sorted(b for b in os.listdir(pfad) if BILD.fullmatch(b)),
         })
     return raus
@@ -226,12 +260,15 @@ def erkennen(projekt: str, lauf: str, bild_bytes: bytes, schwelle: float = 0.25)
     if not LAUF.fullmatch(lauf or ""):
         raise RuntimeError("Unbekannter Lauf")
     gewichte = os.path.join(ordner(projekt), lauf, "gewichte")
-    if not os.path.isfile(os.path.join(gewichte, "config.json")):
+    if not _hat_gewichte(gewichte):
         raise RuntimeError("Dieser Lauf hat keine fertigen Gewichte")
+    skript = SKRIPT
+    if _ist_yolo(lauf):
+        skript, gewichte = YOLO_SKRIPT, os.path.join(gewichte, "best.pt")
     eingabe = os.path.join(ordner(projekt), "probe_eingabe.png")
     with open(eingabe, "wb") as fh:
         fh.write(bild_bytes)
-    aus = subprocess.run([sys.executable, SKRIPT, "erkennen", gewichte, eingabe,
+    aus = subprocess.run([sys.executable, skript, "erkennen", gewichte, eingabe,
                           str(schwelle)], capture_output=True, text=True,
                          timeout=180, cwd=HIER)
     if aus.returncode != 0:

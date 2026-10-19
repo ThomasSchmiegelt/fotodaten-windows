@@ -25,6 +25,7 @@ const MODES = {
   seiten: {label: "Sechs Seiten erzeugen", refs: 0, ph: "", hint: () => ""},
   datensatz: {label: "Liste neu laden", refs: 0, ph: "", hint: () => ""},
   training: {label: "Detektor trainieren", refs: 0, ph: "", hint: () => ""},
+  fotodaten: {label: "Fotodaten erzeugen", refs: 0, ph: "", hint: () => ""},
   retusche: {label: "Retuschieren", refs: 0, ph: "", hint: () => ""},
   varianten: {label: "Varianten erzeugen", refs: 1, sweep: "varianten", count: 12,
               follow: true, lock: false,
@@ -294,6 +295,9 @@ function setMode(next) {
   const istTraining = next === "training";
   $("trainingTabBox").style.display = istTraining ? "block" : "none";
   if (istTraining) detHolen();
+  const istFotodaten = next === "fotodaten";
+  $("fotodatenBox").style.display = istFotodaten ? "block" : "none";
+  if (istFotodaten) fdHolen();
   const istRetusche = next === "retusche";
   $("retuscheBox").style.display = istRetusche ? "block" : "none";
   $("szenenBox").style.display = istSzenen ? "block" : "none";
@@ -302,7 +306,7 @@ function setMode(next) {
   // Kaesten nicht -- Prompt, Darstellung, Bildgroesse.
   const eigen = istDemo || istBausteine || istSzenen || istGeschichte
                 || istKatalog || istSeiten || istDatensatz || istTraining
-                || istRetusche;
+                || istRetusche || istFotodaten;
   eigenerReiter = eigen;
   $("demoBox").style.display = istDemo ? "block" : "none";
   $("bausteinBox").style.display = istBausteine ? "block" : "none";
@@ -931,6 +935,7 @@ $("go").onclick = () => {
   if (mode === "seiten") return seitenStarten();
   if (mode === "datensatz") return datensatzHolen();
   if (mode === "training") return detStarten();
+  if (mode === "fotodaten") return fdStarten();
   if (mode === "retusche") return retStarten();
   start();
 };
@@ -3769,6 +3774,211 @@ $("detBild").onchange = () => {
   leser.readAsDataURL(datei);
 };
 
+// ---------- Fotodaten: echte Fotos zu Trainingsdaten ----------
+// Fotos hochladen, wahlweise die Box von Hand ziehen, Achsen und Werte
+// waehlen. Der Server rechnet die Varianten nach Plan (fotodaten.py) und
+// legt alles mit Box in den Datensatz.
+let FDFOTOS = [], FDKATALOG = {}, FDNAMEN = {}, FDWAHL = {}, fdPlanUhr = null;
+// Was voreingestellt angehakt ist: die vier Achsen aus dem Beispiel.
+const FD_VORGABE = ["paint", "scene", "angle", "light"];
+
+async function fdRuf(daten) {
+  const res = await fetch("/api/fotodaten", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(daten)
+  }).then(r => r.json()).catch(() => null);
+  if (!res || res.error) {
+    say(res ? res.error : "Der Server ist nicht erreichbar.", "err");
+    return null;
+  }
+  return res;
+}
+
+async function fdHolen() {
+  const g = await fdRuf({tu: "katalog", subject: $("fdMotiv").value});
+  if (!g) return;
+  FDKATALOG = g.achsen || {};
+  FDNAMEN = g.namen || {};
+  $("fdBildmodell").innerHTML = g.cloud
+    ? "Bildmodell: <b>Cloud</b> (Kopfzeile › Cloud-Modelle). Jedes Bild kostet dort Geld — die Vorschau unten zählt mit."
+    : g.lokal ? "Bildmodell: <b>Qwen-Image lokal</b> — braucht rund 17 GB Grafikspeicher."
+    : "<span class=\"dsgrund\">Kein Bildmodell: diese Fassung rechnet nur in der Cloud — bitte unter Cloud-Modelle eines eintragen.</span>";
+  // Gewaehltes behalten, soweit es die Werte in der neuen Motivart gibt.
+  const alt = FDWAHL;
+  FDWAHL = {};
+  Object.entries(FDKATALOG).forEach(([feld, werte]) => {
+    const vorher = alt[feld];
+    const keys = werte.map(w => w.key);
+    FDWAHL[feld] = vorher ? {an: vorher.an, werte: vorher.werte.filter(k => keys.includes(k))}
+                          : {an: FD_VORGABE.includes(feld), werte: keys};
+    if (!FDWAHL[feld].werte.length) FDWAHL[feld].werte = keys;
+  });
+  fdAchsenZeigen();
+  fdPlan();
+}
+
+function fdAchsenZeigen() {
+  $("fdAchsen").innerHTML = Object.entries(FDKATALOG).map(([feld, werte]) => {
+    const w = FDWAHL[feld];
+    return `<div class="fdachse">
+      <label class="check"><input type="checkbox" ${w.an ? "checked" : ""}
+        onchange="FDWAHL['${feld}'].an=this.checked;fdAchsenZeigen();fdPlan()">
+        <b>${esc(FDNAMEN[feld] || feld)}</b>
+        <span class="hint">${w.an ? `${w.werte.length} von ${werte.length}` : "bleibt wie im Foto"}</span></label>
+      ${w.an ? `<div class="fdwerte">
+        <a href="#" onclick="fdAlle('${feld}',true);return false">alle</a>
+        <a href="#" onclick="fdAlle('${feld}',false);return false">keine</a>
+        ${werte.map(v => `<label class="fdwert"><input type="checkbox"
+          ${w.werte.includes(v.key) ? "checked" : ""}
+          onchange="fdWert('${feld}','${v.key}',this.checked)">${esc(v.label)}</label>`).join("")}
+      </div>` : ""}
+    </div>`;
+  }).join("");
+}
+
+function fdAlle(feld, an) {
+  FDWAHL[feld].werte = an ? FDKATALOG[feld].map(v => v.key) : [];
+  fdAchsenZeigen(); fdPlan();
+}
+
+function fdWert(feld, key, an) {
+  const w = FDWAHL[feld];
+  w.werte = an ? [...new Set([...w.werte, key])] : w.werte.filter(k => k !== key);
+  // Die Reihenfolge des Katalogs halten, damit "einzeln" lesbar bleibt.
+  w.werte = FDKATALOG[feld].map(v => v.key).filter(k => w.werte.includes(k));
+  fdAchsenZeigen(); fdPlan();
+}
+
+function fdAchsenWahl() {
+  const raus = {};
+  Object.entries(FDWAHL).forEach(([feld, w]) => {
+    if (w.an && w.werte.length) raus[feld] = w.werte;
+  });
+  return raus;
+}
+
+// Wie viele Bilder entstehen -- vom Server gezaehlt, nach derselben Regel.
+function fdPlan() {
+  clearTimeout(fdPlanUhr);
+  fdPlanUhr = setTimeout(async () => {
+    const achsen = fdAchsenWahl();
+    if (!Object.keys(achsen).length) {
+      $("fdVorschau").innerHTML = `<span class="dsgrund">Mindestens eine Achse wählen.</span>`;
+      return;
+    }
+    const res = await fetch("/api/fotodaten", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({tu: "plan", subject: $("fdMotiv").value, achsen,
+                            art: $("fdArt").value,
+                            anzahl: parseInt($("fdAnzahl").value, 10) || 12})
+    }).then(r => r.json()).catch(() => null);
+    if (!res || res.error) return;
+    const n = Math.max(FDFOTOS.length, 1), je = res.je_foto;
+    $("fdVorschau").innerHTML = `<b>${je}</b> Varianten je Foto`
+      + (FDFOTOS.length ? ` · <b>${je * n}</b> Bilder aus ${n} Foto(s)` : "")
+      + ($("fdOriginal").checked && FDFOTOS.length ? ` + ${n} Original(e)` : "");
+  }, 200);
+}
+
+["fdArt", "fdAnzahl", "fdOriginal"].forEach(id => $(id).onchange = fdPlan);
+$("fdAnzahl").oninput = fdPlan;
+$("fdMotiv").onchange = () => {
+  const ziel = {fahrzeug: "the car body", gegenstand: "the object", person: "the person's clothing"};
+  $("fdZiel").value = ziel[$("fdMotiv").value] || "";
+  fdHolen();
+};
+$("fdSuche").onchange = () => {
+  if (!$("fdKeep").dataset.selbst) $("fdKeep").value = `The ${$("fdSuche").value.trim()}`;
+};
+$("fdKeep").oninput = () => { $("fdKeep").dataset.selbst = "1"; };
+
+$("fdDatei").onchange = () => {
+  [...$("fdDatei").files].forEach(datei => {
+    const leser = new FileReader();
+    leser.onload = () => {
+      const bild = new Image();
+      // Die Groesse, wie der Browser das Foto zeigt -- EXIF-Drehung schon
+      // angewandt. Die Box wird in diesen Pixeln gezogen; der Server
+      // rechnet sie auf sein vorbereitetes Foto um.
+      bild.onload = () => {
+        FDFOTOS.push({name: datei.name, bild: leser.result,
+                      groesse: [bild.naturalWidth, bild.naturalHeight], box: null});
+        fdFotosZeigen(); fdPlan();
+      };
+      bild.src = leser.result;
+    };
+    leser.readAsDataURL(datei);
+  });
+  $("fdDatei").value = "";
+};
+
+function fdFotosZeigen() {
+  $("fdFotos").innerHTML = FDFOTOS.map((f, i) => {
+    const e = {breite: f.groesse[0], hoehe: f.groesse[1]};
+    return `<figure class="dsbild">
+      <div class="dsflaeche" onmousedown="fdZiehen(event, ${i})">
+        <img src="${f.bild}" draggable="false" alt="">
+        ${dsRahmen(f.box, e, "dsbox dsneu")}
+      </div>
+      <figcaption>${esc(f.name)} · ${f.groesse[0]}×${f.groesse[1]}<br>
+        ${f.box ? "Box von Hand" : "<i>ohne Box — der Erkenner sucht sie</i>"}
+        ${f.box ? `<a href="#" onclick="FDFOTOS[${i}].box=null;fdFotosZeigen();return false">Box weg</a>` : ""}
+        <a href="#" onclick="FDFOTOS.splice(${i},1);fdFotosZeigen();fdPlan();return false">entfernen</a>
+      </figcaption></figure>`;
+  }).join("");
+}
+
+function fdZiehen(ev, i) {
+  ev.preventDefault();
+  const f = FDFOTOS[i], [b, h] = f.groesse;
+  const flaeche = ev.currentTarget;
+  const r = flaeche.getBoundingClientRect();
+  const punkt = m => [Math.max(0, Math.min(1, (m.clientX - r.left) / r.width)) * b,
+                      Math.max(0, Math.min(1, (m.clientY - r.top) / r.height)) * h];
+  const start = punkt(ev);
+  const zeiger = document.createElement("div");
+  zeiger.className = "dsbox dsneu";
+  flaeche.appendChild(zeiger);
+  const zeichnen = m => {
+    const p = punkt(m);
+    const box = [Math.min(start[0], p[0]), Math.min(start[1], p[1]),
+                 Math.max(start[0], p[0]), Math.max(start[1], p[1])];
+    Object.assign(zeiger.style, {left: 100 * box[0] / b + "%", top: 100 * box[1] / h + "%",
+      width: 100 * (box[2] - box[0]) / b + "%", height: 100 * (box[3] - box[1]) / h + "%"});
+    return box;
+  };
+  const weiter = m => zeichnen(m);
+  const ende = m => {
+    document.removeEventListener("mousemove", weiter);
+    document.removeEventListener("mouseup", ende);
+    const box = zeichnen(m);
+    if (box[2] - box[0] > 4 && box[3] - box[1] > 4) f.box = box.map(Math.round);
+    fdFotosZeigen();
+  };
+  document.addEventListener("mousemove", weiter);
+  document.addEventListener("mouseup", ende);
+}
+
+async function fdStarten() {
+  if (!FDFOTOS.length) return say("Bitte erst Fotos wählen.", "err");
+  const achsen = fdAchsenWahl();
+  if (!Object.keys(achsen).length) return say("Bitte mindestens eine Achse wählen.", "err");
+  const laeuftSchon = $("go").classList.contains("busy");
+  buttonState("busy");
+  const res = await fdRuf({tu: "starten", subject: $("fdMotiv").value,
+    fotos: FDFOTOS, achsen, art: $("fdArt").value,
+    anzahl: parseInt($("fdAnzahl").value, 10) || 12,
+    klasse: $("fdKlasse").value.trim(), suche: $("fdSuche").value.trim(),
+    keep: $("fdKeep").value.trim(), paint_target: $("fdZiel").value.trim(),
+    steps: parseInt($("fdSchritte").value, 10) || 30,
+    base: parseInt($("fdBase").value, 10) || 1024,
+    original: $("fdOriginal").checked, labeln: $("fdLabeln").checked});
+  if (!res) { if (!laeuftSchon) buttonState("idle"); return; }
+  say(`Eingereiht: ${res.bilder} Varianten aus ${FDFOTOS.length} Foto(s) …`, "ok");
+  if (!laeuftSchon) paintSeries([], Math.min(res.bilder, 60), 1);
+  poll();
+}
+
 // ---------- Cloud-Modelle ----------
 // Sprach- und Bildmodell lassen sich einzeln auf eine OpenAI-kompatible
 // Schnittstelle umstellen. Der Schluessel kommt nie zurueck -- nur ob einer
@@ -3800,6 +4010,9 @@ function zeigeCloud(e) {
       : "noch keiner hinterlegt";
   });
   $("cloud_bild_groesse").value = (e.bild || {}).groesse || "genau";
+  $("cloud_bild_art").value = (e.bild || {}).art || "anweisung";
+  $("cloud_bild_staerke").value = (e.bild || {}).staerke ?? 0.6;
+  CLOUDVORLAGEN = e.vorlagen || CLOUDVORLAGEN;
   const an = CLOUDPLAETZE.filter(p => (e[p] || {}).aktiv && (e[p] || {}).modell);
   $("cloudAuf").textContent = an.length
     ? "Cloud: " + an.map(p => p === "bild" ? "Bild" : "Sprache").join(" + ")
@@ -3823,11 +4036,35 @@ $("cloudSpeichern").onclick = async e => {
                         schluessel: $(`cloud_${p}_schluessel`).value.trim()};
   });
   einstellungen.bild.groesse = $("cloud_bild_groesse").value;
+  einstellungen.bild.art = $("cloud_bild_art").value;
+  einstellungen.bild.staerke = parseFloat($("cloud_bild_staerke").value) || 0.6;
+  // Ein Anbieter, ein Schluessel: steht er nur in einem Feld und zeigen
+  // beide Plaetze auf dieselbe Adresse, gilt er fuer beide.
+  const [s, b] = [einstellungen.sprache, einstellungen.bild];
+  if (s.url && s.url === b.url) {
+    if (!s.schluessel && b.schluessel) s.schluessel = b.schluessel;
+    if (!b.schluessel && s.schluessel) b.schluessel = s.schluessel;
+  }
   const res = await cloudRuf({tu: "speichern", einstellungen});
   if (!res) return;
   zeigeCloud(res);
   say("Cloud-Einstellungen gespeichert.", "ok");
 };
+
+// Bekannte Anbieter: Adresse, Modelle und Art des Bildmodells vorbelegen.
+let CLOUDVORLAGEN = {};
+function cloudVorlage(name) {
+  const v = CLOUDVORLAGEN[name];
+  if (!v) return;
+  CLOUDPLAETZE.forEach(p => {
+    $(`cloud_${p}_aktiv`).checked = true;
+    $(`cloud_${p}_url`).value = v.url;
+    $(`cloud_${p}_modell`).value = v[p];
+  });
+  $("cloud_bild_groesse").value = v.groesse;
+  $("cloud_bild_art").value = v.art;
+  say(`${v.label} eingetragen — Schlüssel ergänzen und speichern.`, "ok");
+}
 
 async function cloudPruefen(platz) {
   $(`cloud_${platz}_note`).textContent = "— prüft …";

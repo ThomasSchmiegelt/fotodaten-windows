@@ -37,6 +37,7 @@ Bilder ohne Box liegen bewusst nicht in images/: YOLO liest ein Bild ohne
 Labeldatei als "hier ist nichts" und lernte damit genau das Falsche.
 """
 
+import csv
 import gc
 import json
 import os
@@ -54,12 +55,26 @@ DINO_MODELL = os.environ.get("QWEN_BOX_PRUEFER", "IDEA-Research/grounding-dino-b
 GLEICH = 0.5
 # Eine DINO-Box, die mehr als die Haelfte des Bildes deckt, meint das Auto.
 ZU_GROSS = 0.5
+# Umschliesst eine DINO-Box die VL-Box und ist so viel groesser, zaehlt sie
+# als "das Ganze" und nicht als Teil des gesuchten Objekts.
+GANZES = 8
 # Nur DINO-Boxen ab diesem Wert zaehlen ueberhaupt.
 DINO_SCHWELLE = 0.2
 # Darunter passt Qwen3-VL-2B (~4,5 GB in bfloat16) nicht neben DINO auf die
-# Karte. Es rechnet dann auf der CPU -- langsamer, aber bei ein paar Dutzend
-# Basisbildern egal. QWEN_BOX_GERAET=cpu|cuda setzt es fest.
+# Karte. Dann wird in zwei Phasen gerechnet, wie beim Bildmodell: erst
+# Qwen3-VL fuer alle Bilder auf der Karte, Karte leeren, dann DINO fuer alle.
+# So reicht eine 6-GB-Karte. Erst unter VL_MINDESTENS rechnet Qwen3-VL auf
+# der CPU -- gemessen rund anderthalb Minuten je Bild.
+# QWEN_BOX_GERAET=cpu|cuda setzt das Geraet fest.
 VL_KLEINE_KARTE = 8 * 1024 ** 3
+VL_MINDESTENS = 5 * 1024 ** 3
+# Die Erkenner sehen das Bild hoechstens so gross. Ein Handyfoto mit 12
+# Megapixeln ergaebe fuer Qwen3-VL sonst zehntausend Bildtokens -- auf einer
+# kleinen Karte zu viel, und genauer wird die Box davon nicht.
+ANALYSE_KANTE = 1280
+# Echte Fotos landen hoechstens so gross im Datensatz. Trainiert wird mit 640
+# bis 1280; ein 4000er Original kostete nur Platte und Ladezeit.
+FOTO_KANTE = 2048
 
 ORDNER = {"ok": "images", "pruefen": "pruefen", "verworfen": "verworfen"}
 DATEI = re.compile(r"[\w.\-]+\.png")
@@ -164,6 +179,24 @@ def _formate(projekt: str, daten: list[dict]) -> None:
     with open(os.path.join(pfad, "annotations.json"), "w", encoding="utf-8") as fh:
         json.dump(coco, fh, ensure_ascii=False, indent=1)
 
+    # Die Merkmale je Bild als Tabelle: was gewuerfelt wurde, ob echt oder
+    # erzeugt, aus welchem Foto. Damit laesst sich der Satz ausbalancieren
+    # oder ein Klassifikator auf Farbe, Untergrund, Licht trainieren.
+    spalten = ["datei", "status", "klasse", "echt", "foto", "quelle",
+               "x1", "y1", "x2", "y2", "breite", "hoehe", *ACHSEN]
+    with open(os.path.join(pfad, "attribute.csv"), "w", newline="",
+              encoding="utf-8") as fh:
+        schreiber = csv.writer(fh)
+        schreiber.writerow(spalten)
+        for e in daten:
+            box = e.get("box") or [None] * 4
+            achsen = e.get("achsen") or {}
+            schreiber.writerow([e["datei"], e.get("status"), e.get("klasse"),
+                                1 if e.get("echt") else 0, e.get("foto") or "",
+                                e.get("quelle") or "", *box,
+                                e.get("breite"), e.get("hoehe"),
+                                *(achsen.get(k) or "" for k in ACHSEN)])
+
 
 def bildpfad(projekt: str, status: str, datei: str) -> str | None:
     """Der Pfad eines Datensatzbildes -- jeder Teil gegen sein Muster geprueft."""
@@ -246,42 +279,107 @@ def _beruehrt(a, b) -> bool:
     return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
 
 
+def _flaeche(r) -> float:
+    return max(0, r[2] - r[0]) * max(0, r[3] - r[1])
+
+
+def _umschliesst(aussen, innen, rand: float = 0.1) -> bool:
+    """Liegt `innen` (bis auf einen Rand von 10 % seiner Groesse) in `aussen`?"""
+    db, dh = rand * (innen[2] - innen[0]), rand * (innen[3] - innen[1])
+    return (aussen[0] <= innen[0] + db and aussen[1] <= innen[1] + dh
+            and aussen[2] >= innen[2] - db and aussen[3] >= innen[3] - dh)
+
+
+def _verkleinert(bild):
+    """Das Bild fuer die Erkenner, hoechstens ANALYSE_KANTE gross."""
+    from PIL import Image
+    f = ANALYSE_KANTE / max(bild.size)
+    if f >= 1:
+        return bild
+    return bild.resize((max(1, round(bild.size[0] * f)), max(1, round(bild.size[1] * f))),
+                       Image.LANCZOS)
+
+
+def _dtype(torch, geraet: str):
+    """bfloat16 nur, wo die Karte es selbst rechnet (ab Ampere).
+
+    Eine GTX 1660 oder RTX 2060 -- typische 6-GB-Karten -- emuliert es nur und
+    ist damit langsamer als in float16. Auf der CPU bleibt bfloat16: float16
+    rechnet dort kaum jemand schnell.
+    """
+    if geraet == "cuda" and torch.cuda.get_device_capability(0)[0] < 8:
+        return torch.float16
+    return torch.bfloat16
+
+
 class Erkenner:
-    """Beide Modelle, einmal geladen fuer einen ganzen Stapel Bilder.
+    """Beide Modelle fuer einen ganzen Stapel Bilder.
 
     Gebraucht wird die Karte erst, wenn das Bildmodell sie freigegeben hat;
     `schliessen()` gibt sie wieder her.
+
+    Auf einer grossen Karte liegen beide zugleich darauf. Auf einer kleinen
+    (unter 8 GB) wird in zwei Phasen gerechnet: `alle()` holt erst Qwen3-VL
+    fuer saemtliche Bilder auf die Karte, gibt es wieder frei und laesst dann
+    DINO ueber dieselben Bilder laufen. Ein Ladevorgang je Modell und Stapel,
+    nie beide auf einmal.
     """
 
-    def __init__(self):
+    def __init__(self, melden=None):
         import torch
-        from transformers import (AutoModelForImageTextToText,
-                                  AutoModelForZeroShotObjectDetection,
-                                  AutoProcessor)
         self.torch = torch
+        self.melden = melden or (lambda *a: None)
         self.geraet = "cuda" if torch.cuda.is_available() else "cpu"
+        gesamt = torch.cuda.get_device_properties(0).total_memory \
+            if self.geraet == "cuda" else 0
         self.vl_geraet = os.environ.get("QWEN_BOX_GERAET") or (
-            "cpu" if self.geraet == "cpu" or torch.cuda.get_device_properties(0)
-            .total_memory < VL_KLEINE_KARTE else "cuda")
+            "cuda" if gesamt >= VL_MINDESTENS else "cpu")
+        # Beide zugleich nur, wo der Platz sicher reicht -- oder wenn VL
+        # ohnehin auf der CPU liegt und der Karte nichts wegnimmt.
+        self.zugleich = gesamt >= VL_KLEINE_KARTE or self.vl_geraet == "cpu"
+        self.vl = self.dino = None
+
+    # -- Laden und Freigeben ------------------------------------------------
+    def _vl_laden(self) -> None:
+        if self.vl is not None:
+            return
+        from transformers import AutoModelForImageTextToText, AutoProcessor
+        self.melden(f"Qwen3-VL wird geladen ({self.vl_geraet})")
         self.vl_proc = AutoProcessor.from_pretrained(VL_MODELL)
         self.vl = AutoModelForImageTextToText.from_pretrained(
-            VL_MODELL, dtype=torch.bfloat16).to(self.vl_geraet).eval()
+            VL_MODELL, dtype=_dtype(self.torch, self.vl_geraet)).to(self.vl_geraet).eval()
+
+    def _dino_laden(self) -> None:
+        if self.dino is not None:
+            return
+        from transformers import AutoModelForZeroShotObjectDetection, AutoProcessor
+        self.melden("Grounding DINO wird geladen")
         self.dino_proc = AutoProcessor.from_pretrained(DINO_MODELL)
         self.dino = AutoModelForZeroShotObjectDetection.from_pretrained(
             DINO_MODELL).to(self.geraet).eval()
 
-    def schliessen(self) -> None:
-        del self.vl, self.dino
+    def _frei(self) -> None:
         gc.collect()
         if self.torch.cuda.is_available():
             self.torch.cuda.empty_cache()
 
+    def _vl_weg(self) -> None:
+        self.vl = None
+        self._frei()
+
+    def schliessen(self) -> None:
+        self.vl = self.dino = None
+        self._frei()
+
+    # -- Einzelne Fragen ----------------------------------------------------
     def vl_box(self, bild, suche: str) -> list | None:
         """Qwen3-VL nach der Box fragen. Es antwortet in 0..1000, relativ."""
+        self._vl_laden()
         frage = (f"Find the {suche}. Answer only with JSON: "
                  f'[{{"bbox_2d": [x1, y1, x2, y2], "label": "{suche}"}}]. '
                  "If it is not in the image, answer [].")
-        nachricht = [{"role": "user", "content": [{"type": "image", "image": bild},
+        nachricht = [{"role": "user", "content": [{"type": "image",
+                                                   "image": _verkleinert(bild)},
                                                   {"type": "text", "text": frage}]}]
         eingabe = self.vl_proc.apply_chat_template(
             nachricht, tokenize=True, add_generation_prompt=True,
@@ -301,10 +399,13 @@ class Erkenner:
         return box if box[2] > box[0] and box[3] > box[1] else None
 
     def dino_boxen(self, bild, suche: str) -> list[tuple[list, float]]:
-        eingabe = self.dino_proc(images=bild, text=suche.strip().rstrip(".") + ".",
+        self._dino_laden()
+        eingabe = self.dino_proc(images=_verkleinert(bild),
+                                 text=suche.strip().rstrip(".") + ".",
                                  return_tensors="pt").to(self.geraet)
         with self.torch.no_grad():
             aus = self.dino(**eingabe)
+        # Die Boxen gleich in der Groesse des Originals.
         r = self.dino_proc.post_process_grounded_object_detection(
             aus, eingabe.input_ids, threshold=DINO_SCHWELLE,
             text_threshold=DINO_SCHWELLE, target_sizes=[bild.size[::-1]])[0]
@@ -317,14 +418,21 @@ class Erkenner:
                 raus.append((box, wert))
         return raus
 
-    def pruefen(self, bild, suche: str, basis_box: list | None = None) -> dict:
-        """Box und Urteil fuer ein Bild."""
-        vl = self.vl_box(bild, suche)
-        dino = self.dino_boxen(bild, suche)
+    @staticmethod
+    def urteil(vl, dino, basis_box: list | None = None) -> dict:
+        """Aus der VL-Box und den DINO-Teilen Box und Urteil machen."""
         gruende = []
         # DINO findet Teile: Kugelkopf hier, Steckdose dort. Die Vereinigung
         # aller Teile, die die VL-Box beruehren, ist seine Antwort.
         bezug = vl or (max(dino, key=lambda d: d[1])[0] if dino else None)
+        # Eine DINO-Box, die die VL-Box umschliesst und ein Vielfaches so
+        # gross ist, meint das Ganze -- das Auto, an dem die Kupplung haengt.
+        # ZU_GROSS faengt das nur, wenn das Auto das halbe Bild fuellt; von
+        # hinten fotografiert waren es gemessen 40 %, und die Vereinigung
+        # ergab dann das ganze Heck.
+        if vl:
+            dino = [d for d in dino
+                    if not (_flaeche(d[0]) > GANZES * _flaeche(vl) and _umschliesst(d[0], vl))]
         teile = [d for d in dino if bezug and _beruehrt(d[0], bezug)]
         dino_box = ([min(d[0][0] for d in teile), min(d[0][1] for d in teile),
                      max(d[0][2] for d in teile), max(d[0][3] for d in teile)]
@@ -344,10 +452,59 @@ class Erkenner:
                 "basis_iou": None if basis is None else round(basis, 3),
                 "status": "pruefen" if gruende else "ok", "gruende": gruende}
 
+    def pruefen(self, bild, suche: str, basis_box: list | None = None) -> dict:
+        """Box und Urteil fuer ein einzelnes Bild."""
+        return self.urteil(self.vl_box(bild, suche), self.dino_boxen(bild, suche),
+                           basis_box)
+
+    # -- Ein ganzer Stapel --------------------------------------------------
+    def alle(self, bilder: list, suche: str, melden=None) -> tuple[list, list]:
+        """VL-Boxen und DINO-Teile fuer viele Bilder, phasenweise.
+
+        `bilder` sind Pfade oder PIL-Bilder. Zurueck kommen zwei Listen in
+        derselben Reihenfolge: die VL-Box je Bild und die DINO-Teile je Bild.
+        Die Bilder werden je Phase neu von der Platte gelesen -- bei ein paar
+        hundert Bildern sollen sie nicht alle zugleich im Speicher liegen.
+        """
+        from PIL import Image
+        melden = melden or self.melden
+
+        def lesen(b):
+            if isinstance(b, str):
+                with Image.open(b) as roh:
+                    return roh.convert("RGB")
+            return b.convert("RGB")
+
+        n = len(bilder)
+        vl, dino = [None] * n, [[] for _ in range(n)]
+        if self.zugleich:
+            for i, b in enumerate(bilder):
+                melden(f"Bounding Box {i + 1}/{n}", i, n)
+                bild = lesen(b)
+                vl[i] = self.vl_box(bild, suche)
+                dino[i] = self.dino_boxen(bild, suche)
+            return vl, dino
+        for i, b in enumerate(bilder):
+            melden(f"Bounding Box {i + 1}/{n} · Qwen3-VL", i, 2 * n)
+            vl[i] = self.vl_box(lesen(b), suche)
+        self._vl_weg()
+        for i, b in enumerate(bilder):
+            melden(f"Bounding Box {i + 1}/{n} · Grounding DINO", n + i, 2 * n)
+            dino[i] = self.dino_boxen(lesen(b), suche)
+        return vl, dino
+
 
 def _kamera_fest(meta: dict) -> bool:
     """Wurde an der Kamera nichts gewuerfelt? Dann muss die Box bleiben, wo sie war."""
     return not any(meta.get(k) for k in ("angle", "device", "view", "camera"))
+
+
+ACHSEN = ("paint", "palette", "style", "scene", "light", "angle", "device", "view",
+          "camera", "material", "scenario")
+
+
+def _klassenname(klasse: str) -> str:
+    return re.sub(r"[^a-z0-9_]", "_", (klasse or "objekt").strip().lower())[:40] or "objekt"
 
 
 def aufnehmen(projekt: str, bilder: list[tuple[str, dict]], klasse: str,
@@ -357,47 +514,102 @@ def aufnehmen(projekt: str, bilder: list[tuple[str, dict]], klasse: str,
     `bilder` sind Paare (Pfad, Metadaten des Auftrags). `basis` ist das
     Vorlagenbild der Varianten, falls es eines gab.
     """
+    return aufnehmen_gruppen(projekt, [{"basis": basis, "bilder": bilder}],
+                             klasse, suche, melden)
+
+
+def aufnehmen_gruppen(projekt: str, gruppen: list[dict], klasse: str, suche: str,
+                      melden=None) -> dict:
+    """Mehrere Gruppen auf einmal: je eine Vorlage und ihre Varianten.
+
+    Eine Gruppe ist ein dict mit
+
+        basis       das Vorlagenbild (PIL) oder None
+        basis_box   die Box darin, falls schon bekannt -- etwa von Hand
+                    auf einem echten Foto gezogen
+        original    (Pfad, Metadaten): die Vorlage selbst kommt mit in den
+                    Datensatz. Mit `basis_box` gleich aufgenommen, sonst
+                    wie jedes andere Bild geprueft
+        bilder      [(Pfad, Metadaten)] -- die Varianten
+
+    Die Erkenner laden einmal fuer alle Gruppen. Das Basisbild jeder Gruppe
+    wird im selben Stapel mit erkannt, wenn seine Box noch fehlt.
+    """
     from PIL import Image
 
-    klasse = re.sub(r"[^a-z0-9_]", "_", (klasse or "objekt").strip().lower())[:40] or "objekt"
+    klasse = _klassenname(klasse)
     suche = (suche or klasse.replace("_", " ")).strip()
     melden = melden or (lambda *a: None)
     melden("Box-Modelle werden geladen")
-    erkenner = Erkenner()
-    zaehler = {"ok": 0, "pruefen": 0}
+
+    # Ein flacher Stapel: (Gruppe, Art, Pfad oder Bild, Metadaten)
+    stapel = []
+    for g in gruppen:
+        if g.get("basis") is not None and not g.get("basis_box") and not g.get("original"):
+            stapel.append((g, "basis", g["basis"], {}))
+        if g.get("original"):
+            stapel.append((g, "original", g["original"][0], g["original"][1]))
+        for pfad, meta in g.get("bilder") or []:
+            stapel.append((g, "variante", pfad, meta))
+
+    zu_erkennen = [s for s in stapel
+                   if not (s[1] == "original" and s[0].get("basis_box"))]
+    erkenner = Erkenner(melden)
     try:
-        basis_box = None
-        if basis is not None:
-            basis_box = erkenner.vl_box(basis.convert("RGB"), suche)
-        _klasse_nummer(projekt, klasse)          # legt sie bei Bedarf an
-        neue = []
-        for i, (pfad, meta) in enumerate(bilder, start=1):
-            melden(f"Bounding Box {i}/{len(bilder)}", i - 1, len(bilder))
-            with Image.open(pfad) as roh:
-                bild = roh.convert("RGB")
+        vl, dino = erkenner.alle([s[2] for s in zu_erkennen], suche, melden) \
+            if zu_erkennen else ([], [])
+    finally:
+        erkenner.schliessen()
+    gefunden = {id(s): (vl[i], dino[i]) for i, s in enumerate(zu_erkennen)}
+
+    # Die Basisbox jeder Gruppe: von Hand, sonst was Qwen3-VL im Basisbild
+    # oder im Original gesehen hat.
+    for g in gruppen:
+        if not g.get("basis_box"):
+            for s in stapel:
+                if s[0] is g and s[1] in ("basis", "original") and id(s) in gefunden:
+                    g["basis_box"] = gefunden[id(s)][0]
+
+    _klasse_nummer(projekt, klasse)          # legt sie bei Bedarf an
+    zaehler = {"ok": 0, "pruefen": 0}
+    neue = []
+    for s in stapel:
+        g, art, pfad, meta = s
+        if art == "basis":
+            continue
+        with Image.open(pfad) as roh:
+            groesse = roh.size
+        if art == "original" and g.get("basis_box") and id(s) not in gefunden:
+            urteil = {"box": [round(v) for v in g["basis_box"]], "vl": None,
+                      "dino": None, "dino_wert": 0.0, "ueberein": None,
+                      "basis_iou": None, "status": "ok", "gruende": [],
+                      "von_hand": True}
+        else:
             # Die Basisbox gilt nur, wenn die Kamera stand und das Bild
             # dasselbe Format hat -- sonst liegt die Kupplung woanders.
             vergleich = None
-            if basis_box and _kamera_fest(meta) and abs(
-                    basis.size[0] / basis.size[1] - bild.size[0] / bild.size[1]) < 0.03:
-                f = bild.size[0] / basis.size[0]
-                vergleich = [round(v * f) for v in basis_box]
-            urteil = erkenner.pruefen(bild, suche, vergleich)
-            datei = os.path.basename(pfad)
-            shutil.copy2(pfad, os.path.join(wurzel(projekt), ORDNER[urteil["status"]], datei))
-            zaehler[urteil["status"]] += 1
-            neue.append({
-                "datei": datei, "klasse": klasse, "suche": suche,
-                "breite": bild.size[0], "hoehe": bild.size[1],
-                "angelegt": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "prompt": meta.get("prompt") or "", "seed": meta.get("seed"),
-                "achsen": {k: meta.get(k) for k in ("paint", "palette", "style", "scene",
-                                                   "light", "angle", "device", "view",
-                                                   "camera", "material", "scenario")
-                           if meta.get(k)},
-                **urteil})
-    finally:
-        erkenner.schliessen()
+            basis_groesse = g["basis"].size if g.get("basis") is not None else None
+            if art == "variante" and g.get("basis_box") and basis_groesse \
+                    and _kamera_fest(meta) and abs(basis_groesse[0] / basis_groesse[1]
+                                                   - groesse[0] / groesse[1]) < 0.03:
+                f = groesse[0] / basis_groesse[0]
+                vergleich = [round(v * f) for v in g["basis_box"]]
+            urteil = Erkenner.urteil(*gefunden[id(s)], vergleich)
+        datei = os.path.basename(pfad)
+        shutil.copy2(pfad, os.path.join(wurzel(projekt), ORDNER[urteil["status"]], datei))
+        zaehler[urteil["status"]] += 1
+        eintrag = {
+            "datei": datei, "klasse": klasse, "suche": suche,
+            "breite": groesse[0], "hoehe": groesse[1],
+            "angelegt": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "prompt": meta.get("prompt") or "", "seed": meta.get("seed"),
+            "achsen": {k: meta.get(k) for k in ACHSEN if meta.get(k)},
+            **urteil}
+        if art == "original":
+            eintrag["echt"] = True
+        if meta.get("foto"):
+            eintrag["foto"] = meta["foto"]
+        neue.append(eintrag)
     with _sperre:
         daten = [e for e in eintraege(projekt)
                  if e["datei"] not in {n["datei"] for n in neue}] + neue

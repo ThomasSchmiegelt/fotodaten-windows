@@ -1,0 +1,17 @@
+# Ausbaustufe der portablen Fassung: Bounding Boxes und Detektor-Training
+# auf der eigenen (6-GB-)Karte. torch kommt vorher eigens vom CUDA-Index.
+# diffusers nur fuers Vervielfaeltigen mit neuer Umgebung (SD 1.5, ab 4 GB).
+# Das Bildmodell Qwen-Image laeuft hier nie lokal: start.bat setzt
+# QWEN_NUR_CLOUD=1.
+diffusers==0.41.0
+transformers==5.17.0
+accelerate==1.15.0
+huggingface_hub==1.32.0
+safetensors==0.8.0
+scipy==1.18.1
+ultralytics==8.4.182
+# polars 2.x laedt seine Laufzeit aus einer eigenen DLL, die Windows' Smart
+# App Control sperrt -- danach haengt der Import, und mit ihm das Training
+# (gemessen: kein Fehler, nur Stillstand nach "Polars binary is missing").
+# 1.31.0 laedt.
+polars==1.31.0

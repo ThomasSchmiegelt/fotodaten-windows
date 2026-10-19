@@ -1,0 +1,3 @@
+
+# Windows-Stapeldateien brauchen CRLF
+*.bat text eol=crlf

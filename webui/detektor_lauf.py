@@ -179,6 +179,9 @@ def trainieren(auftrag_datei: str) -> None:
                                         collate_fn=_buendeln, num_workers=2,
                                         drop_last=len(train) > stapel)
     epochen = int(a["epochen"])
+    # bfloat16 nur ab Ampere. Eine GTX 1660 oder RTX 2060 -- die ueblichen
+    # 6-GB-Karten -- emuliert es und waere damit langsamer als ohne.
+    mischen = geraet == "cuda" and torch.cuda.get_device_capability(0)[0] >= 8
     # Das Rueckgrat kennt Bilder schon; es lernt langsamer als der Kopf, der
     # die neue Klasse erst lernen muss.
     rueckgrat = [p for n, p in modell.named_parameters() if "backbone" in n]
@@ -203,7 +206,7 @@ def trainieren(auftrag_datei: str) -> None:
         for pixel, labels in lader:
             pixel = pixel.to(geraet)
             labels = [{k: v.to(geraet) for k, v in l.items()} for l in labels]
-            with torch.autocast(geraet, dtype=torch.bfloat16, enabled=geraet == "cuda"):
+            with torch.autocast(geraet, dtype=torch.bfloat16, enabled=mischen):
                 aus = modell(pixel_values=pixel, labels=labels)
             optimierer.zero_grad()
             aus.loss.backward()

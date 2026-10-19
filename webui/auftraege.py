@@ -18,6 +18,7 @@ import io
 import itertools
 import json
 import os
+import random
 import re
 import sys
 import threading
@@ -25,7 +26,7 @@ import time
 import traceback
 from datetime import datetime
 
-from PIL import Image, PngImagePlugin
+from PIL import Image, ImageOps, PngImagePlugin
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from engine import Engine  # noqa: E402
@@ -37,8 +38,10 @@ import bausteine  # noqa: E402
 import cover  # noqa: E402
 import baender  # noqa: E402
 import szenenbau  # noqa: E402
+import cloud  # noqa: E402
 import datensatz  # noqa: E402
 import detektor  # noqa: E402
+import fotodaten  # noqa: E402
 import sechsseiten  # noqa: E402
 import retusche  # noqa: E402
 import vervielfaeltigen  # noqa: E402
@@ -121,6 +124,9 @@ def _titel(art: str, params: dict) -> str:
         return f"{art}: {was[:44]}" if was else art
     if art == "vervielfaeltigen":
         return f"Datensatz vervielfältigen, {params.get('je_bild') or 10} je Bild"
+    if art == "fotodaten":
+        return (f"Fotodaten: {len(params.get('fotos') or [])} Foto(s) → "
+                f"{params.get('klasse') or 'objekt'}")
     if art == "retusche":
         text = (params.get("prompt") or "").strip()
         return f"Retusche: {text[:48]}" if text else "Retusche"
@@ -300,6 +306,7 @@ def _abarbeiten(auftrag: dict, weitere: list[dict] | None = None) -> None:
                       "szenenbau": run_szenenbau,
                       "sechsseiten": run_sechsseiten, "detektor": run_detektor,
                       "retusche": run_retusche,
+                      "fotodaten": run_fotodaten,
                       "vervielfaeltigen": run_vervielfaeltigen}
             laeufe.get(auftrag["art"], run_job)(auftrag["params"])
         else:
@@ -364,7 +371,10 @@ def decode(data_url: str) -> Image.Image:
     raw = base64.b64decode(data_url.split(",", 1)[-1])
     img = Image.open(io.BytesIO(raw))
     img.load()
-    return img
+    # Handyfotos liegen oft quer in der Datei, die Drehung steht nur im EXIF.
+    # Der Browser zeigt sie aufrecht -- das Modell soll dasselbe sehen, und
+    # eine im Browser gezogene Box oder Maske muss dazu passen.
+    return ImageOps.exif_transpose(img)
 
 
 def _save(meta: dict, image: Image.Image, stamp: str, kind: str,
@@ -566,6 +576,101 @@ def run_job(params: dict) -> None:
     # Die Sperre haelt und loest der Arbeiter -- siehe _abarbeiten().
 
 
+def run_fotodaten(params: dict) -> None:
+    """Echte Fotos zu Trainingsdaten: Varianten nach Plan, dann die Boxen.
+
+    Erst alle Fotos durch das Bildmodell, dann einmal die Box-Modelle fuer
+    alles zusammen -- auf einer kleinen Karte passen die beiden nicht
+    nebeneinander, und so laden sie je nur einmal. Siehe fotodaten.py.
+    """
+    try:
+        engine._cancel = False
+        engine.aborted = False
+        projekt = _projekt_des_laufs
+        subject = params.get("subject") or "fahrzeug"
+        klasse = str(params.get("klasse") or "").strip()
+        suche = str(params.get("suche") or "").strip() or klasse.replace("_", " ")
+        current["translated"] = _translate_inputs(params)
+        keep = (params.get("keep") or "").strip() or f"The {suche}"
+        fotos = [f for f in (params.get("fotos") or []) if f.get("bild")]
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        seed = int(params.get("seed") or 0) or random.randrange(1, 2 ** 31)
+        gruppen = []
+        for nr, foto in enumerate(fotos, start=1):
+            # `aborted` und nicht `_cancel`: run_series setzt `_cancel` bei
+            # jedem Aufruf zurueck, ein Abbruch gilt aber dem ganzen Auftrag.
+            if engine.aborted:
+                break
+            kind = f"foto{nr:02d}"
+            bild = fotodaten.vorbereiten(decode(foto["bild"]))
+            anzeige = foto.get("groesse") or bild.size
+            box = fotodaten.box_umrechnen(foto.get("box"), tuple(anzeige), bild.size)
+            name_original = None
+            if params.get("original", True):
+                # Nummer 00 vor den Varianten: so steht das Original in der
+                # Galerie und im Datensatz gleich neben seinen Abkoemmlingen.
+                name_original = f"{stamp}_{kind}_00_original.png"
+                info = PngImagePlugin.PngInfo()
+                info.add_text("qwen_quelle", str(foto.get("name") or "Foto"))
+                bild.save(os.path.join(ziel(), name_original), pnginfo=info)
+                current["files"].append(name_original)
+            belegungen = fotodaten.plan(params.get("achsen") or {},
+                                        params.get("art") or "beides",
+                                        int(params.get("anzahl") or 12),
+                                        seed + nr, subject)
+            entstanden = []
+
+            def on_image(meta, image, _kind=kind, _liste=entstanden):
+                meta = dict(meta, foto=_kind)
+                name = _save(meta, image, stamp, _kind)
+                current["files"].append(name)
+                _liste.append((os.path.join(ziel(), name), meta))
+
+            # Ein Beschreibungs-Modell (img2img, etwa Z-Image Turbo) braucht
+            # das Zielbild in Worten. Das Sprachmodell schaut einmal je Foto
+            # hin; antwortet es nicht, genuegt der Suchbegriff.
+            beschreibung = ""
+            wolke = cloud.aktiv("bild")
+            if wolke and wolke.get("art") == "beschreibung":
+                melden(f"Foto {nr}/{len(fotos)} wird beschrieben", nr - 1, len(fotos))
+                puffer = io.BytesIO()
+                fotodaten.verkleinert(bild, 1024).save(puffer, format="JPEG", quality=90)
+                beschreibung = chat.bild_zu_prompt(puffer.getvalue())["prompt"] \
+                    or f"A realistic photo showing a {suche}"
+                current["translated"] = dict(current["translated"] or {},
+                                             **{f"foto{nr}": beschreibung})
+
+            melden(f"Foto {nr}/{len(fotos)}: {len(belegungen)} Varianten", nr - 1, len(fotos))
+            engine.run_series(
+                beschreibung=beschreibung,
+                prompt=params.get("prompt") or "", images=[bild], mode="varianten",
+                base=int(params.get("base") or 1024), follow_reference=True,
+                steps=int(params.get("steps") or 30), seed=seed + 1000 * nr,
+                true_cfg_scale=_cfg_fuer(params), keep=keep, subject=subject,
+                paint_target=params.get("paint_target") or "",
+                kombinationen=belegungen, on_image=on_image)
+            gruppen.append({"basis": bild, "basis_box": box,
+                            "original": (os.path.join(ziel(), name_original),
+                                         {"foto": kind}) if name_original else None,
+                            "bilder": entstanden})
+        melden("")
+        done = len(current["files"])
+        meldung = f"fertig: {done} Bild(er) aus {len(gruppen)} Foto(s)"
+        if params.get("labeln", True) and gruppen and not engine.aborted:
+            zahl = datensatz.aufnehmen_gruppen(projekt, gruppen, klasse, suche, melden)
+            melden("")
+            current["datensatz"] = zahl
+            meldung += (f" · Datensatz: {zahl['ok']} aufgenommen, "
+                        f"{zahl['pruefen']} zu prüfen")
+        engine.note("idle", ("abgebrochen · " if engine.aborted else "") + meldung)
+    except Exception:
+        err = traceback.format_exc()
+        print(err, file=sys.stderr)
+        current["error"] = err.strip().splitlines()[-1]
+        melden("")
+        engine.note("error", current["error"])
+
+
 def run_retusche(params: dict) -> None:
     """Eine gemalte Stelle nachbessern -- siehe retusche.py.
 
@@ -689,7 +794,10 @@ def run_vervielfaeltigen(params: dict) -> None:
                     "angelegt": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "prompt": prompt, "seed": seed, "achsen": achsen,
                     "box": box, "status": "ok", "gruende": [],
-                    "quelle": vorlage["datei"]})
+                    "quelle": vorlage["datei"],
+                    # Ein vervielfaeltigtes echtes Foto bleibt ein echtes
+                    # Motiv -- fuer attribute.csv und zum Ausbalancieren.
+                    **{k: vorlage[k] for k in ("foto", "echt") if vorlage.get(k)}})
                 fertig += 1
             # Zwischendurch sichern: ein Abbruch nach einer Stunde soll nicht
             # alles kosten, was bis dahin entstanden ist.

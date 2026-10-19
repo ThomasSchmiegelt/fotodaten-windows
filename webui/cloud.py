@@ -29,7 +29,29 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATEI = os.path.join(ROOT, "einstellungen.json")
 
 PLAETZE = ("sprache", "bild")
-FELDER = ("aktiv", "url", "schluessel", "modell", "groesse")
+FELDER = ("aktiv", "url", "schluessel", "modell", "groesse", "art", "staerke")
+
+# Wie das Bildmodell eine Vorlage versteht. "anweisung": ein Bearbeitungs-
+# modell (gpt-image, Qwen-Image-Edit) liest "faerbe das Auto rot, lass die
+# Kupplung" als Auftrag. "beschreibung": ein Text-zu-Bild-Modell im img2img-
+# Betrieb (Z-Image Turbo bei franconia.ai) malt die Vorlage nach dem Prompt
+# neu -- es braucht eine Beschreibung des *Zielbildes* und eine Staerke, wie
+# weit es sich von der Vorlage entfernen darf.
+ARTEN = ("anweisung", "beschreibung")
+# Vorlagen gehen hoechstens so gross hinaus, und immer in Vielfachen von 16:
+# franconia.ai lehnt alles andere ab ("Breite und Hoehe muessen ein
+# Vielfaches von 16 sein"), andere Anbieter stoert es nicht.
+VORLAGE_KANTE = 1536
+
+# Bekannte Anbieter: ein Klick fuellt Adresse und Modelle.
+VORLAGEN = {
+    "franconia": {"label": "franconia.ai", "url": "https://api.franconia.ai/v1",
+                  "sprache": "Qwen 3.8 27B", "bild": "Z Image Turbo",
+                  "groesse": "genau", "art": "beschreibung"},
+    "openai": {"label": "OpenAI", "url": "https://api.openai.com/v1",
+               "sprache": "gpt-4.1-mini", "bild": "gpt-image-1",
+               "groesse": "openai", "art": "anweisung"},
+}
 
 # Groesse beim Bildmodell. "genau" schickt die Kantenlaengen, die auch das
 # lokale Modell rechnen wuerde. Die OpenAI-Bildmodelle nehmen aber nur drei
@@ -43,7 +65,8 @@ _sperre = threading.Lock()
 
 def _leer() -> dict:
     return {p: {"aktiv": False, "url": "", "schluessel": "", "modell": "",
-                "groesse": "genau"} for p in PLAETZE}
+                "groesse": "genau", "art": "anweisung", "staerke": 0.6}
+            for p in PLAETZE}
 
 
 def lesen() -> dict:
@@ -96,6 +119,13 @@ def schreiben(neu: dict) -> dict:
                     ziel[feld] = str(eintrag[feld] or "").strip()
             if eintrag.get("groesse") in GROESSEN:
                 ziel["groesse"] = eintrag["groesse"]
+            if eintrag.get("art") in ARTEN:
+                ziel["art"] = eintrag["art"]
+            if "staerke" in eintrag:
+                try:
+                    ziel["staerke"] = max(0.1, min(1.0, float(eintrag["staerke"])))
+                except (TypeError, ValueError):
+                    pass
             if str(eintrag.get("schluessel") or "").strip():
                 ziel["schluessel"] = str(eintrag["schluessel"]).strip()
             if eintrag.get("schluessel_loeschen"):
@@ -246,12 +276,32 @@ def _formular(felder: dict, dateien: list[tuple[str, str, bytes]]) -> tuple[byte
     return b"".join(teile), f"multipart/form-data; boundary={grenze}"
 
 
+def _vorlage(bild):
+    """Eine Vorlage zum Versand: RGB, hoechstens VORLAGE_KANTE, Kanten /16."""
+    from PIL import Image
+    bild = bild.convert("RGB")
+    f = min(1.0, VORLAGE_KANTE / max(bild.size))
+    b = max(16, int(bild.size[0] * f) // 16 * 16)
+    h = max(16, int(bild.size[1] * f) // 16 * 16)
+    if (b, h) != bild.size:
+        bild = bild.resize((b, h), Image.LANCZOS)
+    return bild
+
+
+# Anbieter, die die Zusatzfelder abgelehnt haben -- danach ohne sie.
+_ohne_zusatz: set = set()
+
+
 def bild(prompt: str, breite: int, hoehe: int, vorlagen: list | None = None,
-         timeout: int = 300):
+         timeout: int = 300, seed: int | None = None, schritte: int | None = None):
     """Ein Bild vom Cloud-Bildmodell. Mit Vorlagen ueber /images/edits.
 
-    Seed und negativer Prompt gibt es in der Schnittstelle nicht -- ein
-    Cloud-Bild ist darum nicht wiederholbar wie ein lokales.
+    Seed, Schrittzahl und -- bei einem Beschreibungs-Modell -- die img2img-
+    Staerke gehen als Zusatzfelder mit. Die OpenAI-Schnittstelle kennt sie
+    nicht, vLLM-Omni (franconia.ai) reicht sie an das Modell durch: dort ist
+    ein Cloud-Bild dann wiederholbar wie ein lokales. Lehnt ein Anbieter die
+    Felder ab (400), geht derselbe Aufruf einmal ohne sie, und dieser
+    Anbieter bekommt sie danach nicht mehr.
     """
     from PIL import Image
 
@@ -259,21 +309,38 @@ def bild(prompt: str, breite: int, hoehe: int, vorlagen: list | None = None,
     if not e:
         raise RuntimeError("Kein Cloud-Bildmodell eingestellt")
     groesse = _groesse(e, breite, hoehe)
-    if vorlagen:
-        dateien = []
-        for i, v in enumerate(vorlagen):
-            puffer = io.BytesIO()
-            v.save(puffer, format="PNG")
-            dateien.append(("image[]" if len(vorlagen) > 1 else "image",
-                            f"vorlage{i + 1}.png", puffer.getvalue()))
-        daten, art = _formular({"model": e["modell"], "prompt": prompt,
-                                "size": groesse, "n": "1"}, dateien)
-        roh = _anfrage(e, "/images/edits", daten, art, timeout)
-    else:
-        roh = _anfrage(e, "/images/generations",
-                       json.dumps({"model": e["modell"], "prompt": prompt,
-                                   "size": groesse, "n": 1}).encode("utf-8"),
-                       "application/json", timeout)
+    zusatz = {}
+    if e["url"] not in _ohne_zusatz:
+        if seed is not None:
+            zusatz["seed"] = int(seed) % 2 ** 32
+        if schritte:
+            zusatz["num_inference_steps"] = int(schritte)
+        if vorlagen and e.get("art") == "beschreibung":
+            zusatz["strength"] = float(e.get("staerke") or 0.6)
+
+    def senden(mit: dict):
+        if vorlagen:
+            dateien = []
+            for i, v in enumerate(vorlagen):
+                puffer = io.BytesIO()
+                _vorlage(v).save(puffer, format="PNG")
+                dateien.append(("image[]" if len(vorlagen) > 1 else "image",
+                                f"vorlage{i + 1}.png", puffer.getvalue()))
+            daten, art = _formular({"model": e["modell"], "prompt": prompt,
+                                    "size": groesse, "n": "1", **mit}, dateien)
+            return _anfrage(e, "/images/edits", daten, art, timeout)
+        return _anfrage(e, "/images/generations",
+                        json.dumps({"model": e["modell"], "prompt": prompt,
+                                    "size": groesse, "n": 1, **mit}).encode("utf-8"),
+                        "application/json", timeout)
+
+    try:
+        roh = senden(zusatz)
+    except RuntimeError as fehler:
+        if not zusatz or " 400:" not in str(fehler):
+            raise
+        _ohne_zusatz.add(e["url"])
+        roh = senden({})
     try:
         eintrag = roh["data"][0]
     except (KeyError, IndexError, TypeError):

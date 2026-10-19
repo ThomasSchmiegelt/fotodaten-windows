@@ -24,12 +24,37 @@ import re
 import threading
 import time
 
-# Weniger Fragmentierung auf der 24-GB-Karte; muss vor dem ersten CUDA-Zugriff stehen.
-os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+# Weniger Fragmentierung auf der 24-GB-Karte; muss vor dem ersten CUDA-Zugriff
+# stehen. Unter Windows kennt PyTorch die Einstellung nicht und warnt nur.
+if os.name != "nt":
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
-import torch
-from diffusers import QwenImage21Pipeline
-from diffusers.pipelines.qwenimage21.pipeline_qwenimage21 import calculate_dimensions
+# Ohne torch und diffusers laeuft das Programm als reine Cloud-Fassung: die
+# portable Ausgabe fuer Windows bringt beides nicht mit. Gerechnet wird dann
+# nur ueber das Cloud-Bildmodell, alles davor -- Prompt, Varianten, Seeds --
+# bleibt derselbe Weg.
+# QWEN_NUR_CLOUD=1 erzwingt das auch dann, wenn torch da ist: die portable
+# Fassung bringt torch fuer Boxen und Training mit, das Bildmodell passt
+# aber nicht auf ihre 6-GB-Karte.
+try:
+    if os.environ.get("QWEN_NUR_CLOUD", "") not in ("", "0"):
+        raise ImportError("nur Cloud")
+    import torch
+    from diffusers import QwenImage21Pipeline
+    from diffusers.pipelines.qwenimage21.pipeline_qwenimage21 import calculate_dimensions
+    LOKAL = True
+except ImportError:
+    torch = None
+    LOKAL = False
+
+    class QwenImage21Pipeline:          # nur, damit die Klasse unten entsteht
+        pass
+
+    def calculate_dimensions(target_area, ratio):
+        """Wie in diffusers: Flaeche und Verhaeltnis, Vielfache von 32."""
+        width = math.sqrt(target_area * ratio)
+        height = width / ratio
+        return round(width / 32) * 32, round(height / 32) * 32, None
 
 import cloud  # noqa: E402
 from kataloge import (
@@ -42,7 +67,11 @@ from kataloge import (
 )
 
 REPO = os.environ.get("QWEN_IMAGE_REPO", "Qwen/Qwen-Image-2.1")
-DTYPE = torch.bfloat16
+# Ein fester Stand des Modells. Ohne Angabe gilt "main" -- und erscheint dort
+# eine neue Fassung, laedt der naechste Auftrag erst stillschweigend die
+# geaenderten Teile (beim Text-Encoder 17 GB), bevor er rechnet.
+REVISION = os.environ.get("QWEN_IMAGE_REVISION") or None
+DTYPE = torch.bfloat16 if LOKAL else None
 DEVICE = "cuda"
 MAX_REFERENCES = 4
 # Jedes Referenzbild belegt (kante/16)^2/4 Tokens in der Transformer-Sequenz, und
@@ -110,7 +139,7 @@ class _StagedPipeline(QwenImage21Pipeline):
 
 def _free() -> None:
     gc.collect()
-    if torch.cuda.is_available():
+    if LOKAL and torch.cuda.is_available():
         torch.cuda.synchronize()
         torch.cuda.empty_cache()
 
@@ -118,7 +147,7 @@ def _free() -> None:
 # Farben und Oberflaechen, die ein graues Modell nicht hat.
 FARBWORT = re.compile(
     r"\b(?:gold(?:en)?|silver(?:y)?|blue|white|black|red|green|yellow|orange|"
-    r"purple|pink|brown|grey|gray|copper|bronze|chrome|shiny|shimmering|"
+    r"purple|pink|brown|grey|gray|beige|tan|cream|copper|bronze|chrome|shiny|shimmering|"
     r"glossy|metallic|reflective|gold-finished|gold-foil)\b[ -]?", re.I)
 
 
@@ -167,7 +196,7 @@ def _karte() -> dict:
     gerechnet wird. `mem_get_info` zaehlt alle Prozesse mit, nicht nur
     diesen: auch Ollama liegt dort.
     """
-    if not torch.cuda.is_available():
+    if not LOKAL or not torch.cuda.is_available():
         return {}
     try:
         frei, gesamt = torch.cuda.mem_get_info()
@@ -272,7 +301,7 @@ class Engine:
 
     # -- Cloud ------------------------------------------------------------
     def _aus_der_cloud(self, jobs, images, width, height, effect, form,
-                       on_image) -> list:
+                       on_image, steps: int | None = None) -> list:
         """Dieselben Auftraege, nur vom Cloud-Bildmodell gerechnet.
 
         Alles davor -- Prompt, Effekt, Varianten, Seeds -- ist dasselbe wie
@@ -285,8 +314,11 @@ class Engine:
                 break
             self._set(state="denoising", image=index, step=0, total=1,
                       message=f"Bild {index}/{len(jobs)} · Cloud-Modell rechnet")
-            image_out = cloud.bild(job["prompt"], width, height, images or None)
-            meta = {k: v for k, v in job.items() if k != "embeds"}
+            prompt = job.get("prompt_cloud") or job["prompt"]
+            image_out = cloud.bild(prompt, width, height, images or None,
+                                   seed=job.get("seed"), schritte=steps)
+            meta = {k: v for k, v in job.items() if k not in ("embeds", "prompt_cloud")}
+            meta["prompt"] = prompt
             meta.update(index=index, effect=effect, form=form, cloud=True)
             results.append(meta)
             if on_image:
@@ -295,7 +327,7 @@ class Engine:
 
     # -- Laden ------------------------------------------------------------
     def _load(self, kacheln: bool = True, **skip):
-        pipe = _StagedPipeline.from_pretrained(REPO, dtype=DTYPE, **skip)
+        pipe = _StagedPipeline.from_pretrained(REPO, dtype=DTYPE, revision=REVISION, **skip)
         pipe.to(DEVICE)
         if getattr(pipe, "vae", None) is not None:
             # Slicing teilt nur den Stapel und kostet nichts an Bildqualitaet.
@@ -332,8 +364,14 @@ class Engine:
         subject: str = "fahrzeug",
         paint_target: str = "",
         lock_seed: bool = False,
+        kombinationen: list | None = None,
     ) -> list[dict]:
         """Baut die Auftragsliste einer Serie.
+
+        `kombinationen` ist eine fertige Liste, je Bild ein dict
+        Achse -> Schluessel -- etwa aus `fotodaten.plan`. Sie bestimmt dann
+        die Anzahl und geht jedem Wuerfeln vor; feste Werte der uebrigen
+        Achsen bleiben.
 
         Fest gewaehlte Voreinstellungen gelten fuer alle Bilder. `sweep` bestimmt,
         wie die Serie variiert:
@@ -370,13 +408,17 @@ class Engine:
         rng.shuffle(lichter)
         rng.shuffle(looks)
         jobs = []
+        if kombinationen:
+            count = len(kombinationen)
         for i in range(count):
             pick = {"view": view, "style": style, "light": light, "camera": camera,
                     "paint": paint, "palette": palette, "scene": scene,
                     "angle": angle, "device": device, "haltung": haltung,
                     "kleidung": kleidung,
                     "scenario": scenario, "material": material}
-            if sweep == "varianten":
+            if kombinationen:
+                pick.update({k: v for k, v in kombinationen[i].items() if k in pick})
+            elif sweep == "varianten":
                 # Jede Achse eigenstaendig gewuerfelt. Ein fester Wert bleibt
                 # fest, AXIS_OFF schaltet die Achse ganz ab.
                 for field, table in achsen.items():
@@ -514,6 +556,8 @@ class Engine:
         style=None,
         light=None,
         camera=None,
+        kombinationen: list | None = None,
+        beschreibung: str = "",
         on_image=None,
     ) -> list[dict]:
         """Erzeugt `count` Bilder. `images` schaltet auf Referenzbilder um.
@@ -559,7 +603,7 @@ class Engine:
                              device=device, scenario=scenario, material=material,
                              haltung=haltung, kleidung=kleidung,
                              subject=subject, paint_target=paint_target,
-                             lock_seed=lock_seed)
+                             lock_seed=lock_seed, kombinationen=kombinationen)
 
         self._cancel = False
         self._set(state="loading", image=0, count=len(jobs), step=0, total=steps,
@@ -576,9 +620,31 @@ class Engine:
 
         cond_base = reference_resolution(base, len(images))
 
-        if cloud.aktiv("bild"):
+        wolke = cloud.aktiv("bild")
+        if wolke:
+            if wolke.get("art") == "beschreibung" and images and mode == "varianten":
+                # Ein img2img-Modell liest keine Anweisung "lass X, aendere Y"
+                # -- es malt, was dasteht. Also das Zielbild beschreiben: was
+                # im Foto ist, was bleiben soll, und die Achsen dieses Bildes.
+                # Die Geometrie haelt die Vorlage selbst fest.
+                grund = " ".join(t.strip().rstrip(".") + "." for t in
+                                 (beschreibung or prompt, keep) if t and t.strip())
+                for job in jobs:
+                    picks = {k: _axis(job.get(k)) for k in
+                             ("view", "style", "light", "camera", "paint", "palette",
+                              "scene", "angle", "device", "scenario", "material",
+                              "haltung", "kleidung")}
+                    # Soll die Farbe wechseln, darf die alte nicht im Text
+                    # stehen: "a beige station wagon ... the car body is
+                    # bright red" malt ein img2img-Modell als beides.
+                    text = _ohne_farben(grund) if picks["paint"] else grund
+                    job["prompt_cloud"] = build_prompt(text, paint_target=paint_target,
+                                                       **picks)
             return self._aus_der_cloud(jobs, images, width, height, effect,
-                                       form, on_image)
+                                       form, on_image, steps)
+        if not LOKAL:
+            raise RuntimeError("Diese Fassung rechnet nur in der Cloud: bitte unter "
+                               "Cloud-Modelle ein Bildmodell eintragen und einschalten")
 
         # --- Phase 1: alle Prompts einbetten ------------------------------
         encoder = self._load(transformer=None, vae=None)

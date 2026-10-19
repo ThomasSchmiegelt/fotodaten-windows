@@ -31,6 +31,12 @@
         in <code>einstellungen.json</code> neben dem Programm, nur für dich
         lesbar und nicht im Repository; an die Seite geht er nie zurück. Leer
         lassen behält den hinterlegten.</p>
+      <p class="hint">Anbieter vorbelegen:
+        <a href="#" onclick="cloudVorlage('franconia');return false"><b>franconia.ai</b></a>
+        (Z Image Turbo + Qwen 3.8 27B, Server in Deutschland) ·
+        <a href="#" onclick="cloudVorlage('openai');return false">OpenAI</a>
+        — danach nur noch den Schlüssel eintragen und speichern. Gilt bei
+        beiden Plätzen dieselbe Adresse, reicht der Schlüssel in einem Feld.</p>
       <h3 class="stufe">Sprachmodell</h3>
       <p class="hint">Übersetzen, Prompts ausformulieren, Seitenansichten, Bilder beschreiben — statt Ollama.</p>
       <label class="check"><input type="checkbox" id="cloud_sprache_aktiv">
@@ -71,6 +77,25 @@
         <option value="openai">nächstes OpenAI-Format (1024², 1536×1024, 1024×1536)</option>
         <option value="auto">auto — der Anbieter entscheidet</option>
       </select>
+      <div class="axis">
+        <div>
+          <label for="cloud_bild_art">Das Modell versteht</label>
+          <select id="cloud_bild_art">
+            <option value="anweisung">Anweisungen — ein Bearbeitungsmodell (gpt-image, Qwen-Image-Edit)</option>
+            <option value="beschreibung">Beschreibungen — Text-zu-Bild mit Vorlage, img2img (Z Image Turbo)</option>
+          </select>
+        </div>
+        <div>
+          <label for="cloud_bild_staerke">Stärke bei img2img</label>
+          <input type="number" id="cloud_bild_staerke" min="0.1" max="1" step="0.05" value="0.6">
+        </div>
+      </div>
+      <p class="hint">Bei <b>Beschreibungen</b> beschreibt das Sprachmodell jedes Foto
+        einmal, und das Bildmodell bekommt das Zielbild in Worten statt einer
+        Anweisung. Die Stärke sagt, wie weit es sich von der Vorlage entfernen
+        darf: 0,4 ändert Farbe und Licht, ab 0,7 auch Untergrund und Umgebung —
+        und verschiebt dann eher die Umrisse. Seed und Schritte gehen mit, wo
+        der Anbieter sie kennt.</p>
       <p class="hint"><a href="#" onclick="cloudPruefen('bild');return false">Verbindung prüfen</a>
         <span id="cloud_bild_note"></span></p>
       <p class="hint"><a href="#" id="cloudSpeichern"><b>Speichern</b></a></p>
@@ -100,6 +125,7 @@
       <button id="tab-gruppe">Gruppe</button>
       <button id="tab-person">Rundum</button>
       <button id="tab-varianten">Varianten</button>
+      <button id="tab-fotodaten">Fotodaten</button>
       <button id="tab-retusche">Retusche</button>
       <button id="tab-demo">Ablauf</button>
       <button id="tab-bausteine">Bausteine</button>
@@ -510,15 +536,105 @@
         <b>Feineinstellung</b> unten.</p>
     </fieldset>
 
+    <fieldset id="fotodatenBox" style="display:none">
+      <legend>Trainingsdaten aus echten Fotos</legend>
+      <p class="hint">Eigene Fotos hochladen — etwa ein Auto mit
+        Anhängerkupplung. Aus jedem entstehen Varianten mit anderer
+        <b>Farbe</b>, anderem <b>Untergrund</b>, anderer <b>Kameraposition</b>
+        und anderem <b>Licht</b>, einzeln und kombiniert. Danach bekommt jedes
+        Bild seine Bounding Box (Qwen3-VL + Grounding DINO) und landet mit dem
+        Original im <b>Datensatz</b> — als YOLO, COCO und
+        <code>attribute.csv</code>.</p>
+      <p class="hint" id="fdBildmodell"></p>
+
+      <h3 class="stufe">1 · Fotos</h3>
+      <input type="file" id="fdDatei" accept="image/*" multiple>
+      <p class="hint"><b>Box von Hand (empfohlen):</b> mit der Maus über das
+        Objekt ziehen. Ein Original mit gezogener Box wird sofort aufgenommen
+        und dient den Varianten als Bezug. Ohne Box sucht sie der Erkenner.</p>
+      <div id="fdFotos" class="dsgitter"></div>
+
+      <h3 class="stufe">2 · Was gesucht wird</h3>
+      <div class="axis">
+        <div>
+          <label for="fdKlasse">Klasse (klein, ohne Leerzeichen)</label>
+          <input id="fdKlasse" value="anhaengerkupplung">
+        </div>
+        <div>
+          <label for="fdSuche">Suchbegriff (englisch)</label>
+          <input id="fdSuche" value="tow hitch">
+        </div>
+        <div>
+          <label for="fdMotiv">Motivart</label>
+          <select id="fdMotiv">
+            <option value="fahrzeug">Fahrzeug</option>
+            <option value="gegenstand">Gegenstand</option>
+            <option value="person">Person</option>
+          </select>
+        </div>
+        <div>
+          <label for="fdZiel">Was umgefärbt wird (Farbachse)</label>
+          <input id="fdZiel" value="the car body">
+        </div>
+      </div>
+      <label for="fdKeep">Was unverändert bleiben muss</label>
+      <input id="fdKeep" value="The black tow hitch with the ball neck and its socket">
+
+      <h3 class="stufe">3 · Achsen</h3>
+      <p class="hint">Haken setzen, welche Achsen sich ändern dürfen, und je
+        Achse die Werte wählen. Nicht gewählte Achsen bleiben wie im Foto.</p>
+      <div id="fdAchsen"></div>
+
+      <h3 class="stufe">4 · Plan</h3>
+      <div class="axis">
+        <div>
+          <label for="fdArt">Varianten</label>
+          <select id="fdArt">
+            <option value="beides">einzeln und kombiniert</option>
+            <option value="einzeln">einzeln — jede Achse für sich</option>
+            <option value="kombiniert">kombiniert — alles zugleich</option>
+            <option value="alle">alle Kombinationen</option>
+          </select>
+        </div>
+        <div>
+          <label for="fdAnzahl">Kombinierte je Foto</label>
+          <input type="number" id="fdAnzahl" value="12" min="1" max="500">
+        </div>
+        <div>
+          <label for="fdSchritte">Schritte (nur lokal)</label>
+          <input type="number" id="fdSchritte" value="30" min="8" max="60">
+        </div>
+        <div>
+          <label for="fdBase">Kantenlänge</label>
+          <select id="fdBase">
+            <option value="768">768 px</option>
+            <option value="1024" selected>1024 px</option>
+          </select>
+        </div>
+      </div>
+      <label class="check"><input type="checkbox" id="fdOriginal" checked>
+        Originalfotos mit in den Datensatz</label>
+      <label class="check"><input type="checkbox" id="fdLabeln" checked>
+        Bounding Boxes gleich setzen</label>
+      <p class="hint" id="fdVorschau"></p>
+      <p class="hint">Gestartet wird mit dem großen Knopf unten. Danach im
+        Reiter <b>Datensatz</b> die Prüfliste ansehen, im Reiter
+        <b>Training</b> D-FINE oder YOLO26 trainieren.</p>
+    </fieldset>
+
     <fieldset id="trainingTabBox" style="display:none">
-      <legend>Detektor-Training (D-FINE)</legend>
+      <legend>Detektor-Training (D-FINE oder YOLO26)</legend>
       <p class="hint" id="detKopf"></p>
       <table class="dettab">
         <tr><th><label for="detModell">Modell</label></th>
           <td><select id="detModell"></select></td>
           <td class="hint">Nano reicht zum Anfangen. Größer lohnt erst ab
             einigen hundert Bildern. D-FINE steht wie seine trainierten
-            Gewichte unter Apache 2.0 — frei, auch kommerziell.</td></tr>
+            Gewichte unter Apache 2.0 — frei, auch kommerziell.
+            <b>YOLO26</b> (Ultralytics) läuft auf einer 6-GB-Karte mit n und s
+            bequem; es steht unter AGPL-3.0, und Ultralytics zählt die
+            trainierten Gewichte dazu — für eigene Versuche gleichgültig,
+            für ein weitergegebenes Modell nicht.</td></tr>
         <tr><th><label for="detEpochen">Epochen</label></th>
           <td><input type="number" id="detEpochen" value="80" min="1" max="1000"></td>
           <td class="hint">Wie oft das Modell den ganzen Datensatz sieht.

@@ -39,6 +39,15 @@ im Terminal.
 | anderer Port | `./start.sh 8080` |
 | vom Handy im selben Netz | `QWEN_HOST=0.0.0.0 ./start.sh` |
 
+**Unter Windows:** den Ordner von GitHub herunterladen und entpacken, einmal
+**`einrichten.bat`** doppelklicken (lädt Python, Pakete und Modelle in diesen
+Ordner, ohne Installation), danach **`start.bat`**. Der Ordner ist dann
+portabel — kopieren genügt. Für einen Rechner, auf dem nur trainiert wird
+(etwa ein Notebook mit RTX 1000 Ada), reicht `einrichten.bat training`;
+siehe die Tabelle im README. Einstellungen nur für diesen Rechner — etwa
+`set QWEN_HOST=0.0.0.0` — gehören in eine Datei `lokal.bat` daneben;
+`start.bat` liest sie mit.
+
 **Immer nur eine Instanz.** Zwei Server laden je 17 GB auf die Grafikkarte
 und werfen sich gegenseitig hinaus. Meldet `start.sh`
 `OSError: [Errno 98] Address already in use`, läuft schon einer — siehe
@@ -69,6 +78,7 @@ nächsten Auftrags.
 | Gruppe | mehrere Personen in ein Bild |
 | Rundum | eine Person von allen Seiten |
 | Varianten | ein Basisbild vielfach abwandeln — etwa für Trainingsdaten |
+| Fotodaten | aus echten Fotos Varianten nach Plan, gleich mit Box im Datensatz |
 | Retusche | eine Stelle nachbessern: Fleck, schiefes Lächeln, Hand |
 | Ablauf | eine Bildfolge mit Video |
 | Bausteine | Personen, Orte, Gegenstände zum Wiederverwenden |
@@ -77,7 +87,7 @@ nächsten Auftrags.
 | Katalog | alle Bausteine aus allen Projekten |
 | Sechs Seiten | ein Gegenstand von vorn, hinten, links, rechts, oben, unten |
 | Datensatz | Bounding Boxes prüfen, aufnehmen, korrigieren |
-| Training | einen Detektor (D-FINE) trainieren und ausprobieren |
+| Training | einen Detektor (D-FINE oder YOLO26) trainieren und ausprobieren |
 
 **Der große Knopf unten** startet, was der Reiter verspricht. Seine
 Beschriftung sagt es jeweils („Erzeugen“, „Erstes Bild erzeugen“,
@@ -297,6 +307,10 @@ YOLO steht unter AGPL-3.0, und Ultralytics zählt trainierte Gewichte mit
 dazu.) Der Datensatz wird trotzdem auch im YOLO-Format abgelegt — wer mag,
 kann ihn mit jedem Werkzeug weiterverwenden.
 
+**Aus eigenen Fotos geht es kürzer:** der Reiter **Fotodaten** erledigt
+Schritt 2 für echte Fotos in einem Zug — siehe [7a](#7a-trainingsdaten-aus-echten-fotos).
+Trainieren lässt sich außer D-FINE auch **YOLO26** (Schritt 4).
+
 ```
  Basisbild ──► Varianten ──► Box suchen ──► Datensatz prüfen ──► Vervielfältigen ──► Detektor trainieren ──► am Foto testen
                 (Reiter       (automatisch)   (Reiter              (Reiter Datensatz,   (Reiter
@@ -394,13 +408,22 @@ Die Kette geht trotzdem, aufgeteilt:
    Schritt 2 mit **Varianten** und Haken bei **Trainingsdaten** —
    20 bis 50 Bilder aus verschiedenen Blickwinkeln reichen.
 2. **Boxen lokal.** Das Programm erkennt die kleine Karte (unter 8 GB) und
-   lässt Qwen3-VL auf der CPU rechnen; Grounding DINO bleibt auf der Karte
-   (gemessen ~2 GB). Das dauert etwa anderthalb Minuten je Bild.
+   rechnet in **zwei Phasen**: erst Qwen3-VL für alle Bilder auf der Karte,
+   dann wird sie geleert und Grounding DINO läuft über dieselben Bilder. So
+   liegen nie beide zugleich auf der Karte, und eine 6-GB-Karte reicht.
+   Erst unter 5 GB rechnet Qwen3-VL auf der CPU (rund anderthalb Minuten je
+   Bild). Große Fotos sehen die Erkenner höchstens 1280 px groß.
 3. **Prüfen** wie in Schritt 3.
 4. **Lokal vervielfältigen** wie oben. SD 1.5 wird dann Schicht für Schicht
    auf die Karte geholt: gemessen 1,3 GB Spitze, auf der 3090 ~18 s je Bild,
    auf einer kleinen Karte entsprechend länger.
-5. **Trainieren**: D-FINE *nano* oder *small* mit kleiner Bildgröße.
+5. **Trainieren**: D-FINE *nano* oder *small*, oder **YOLO26 n/s** —
+   beide gehen auf 6 GB.
+
+Das alles ohne Installation: die **portable Fassung**
+(`python portable\bauen.py <Ziel> --ausbau --modelle`) bringt Python,
+PyTorch und die Box-Modelle in einem Ordner mit; das Bildmodell kommt dort
+immer aus der Cloud.
 
 Die Vielfalt der Blickwinkel kommt so vom großen Modell, die Menge vom
 eigenen Rechner. `QWEN_BOX_GERAET=cpu` bzw. `cuda` legt fest, wo Qwen3-VL
@@ -412,7 +435,7 @@ Reiter **Training**. Die Einstellungen stehen als Tabelle:
 
 | Feld | Empfehlung |
 |---|---|
-| Modell | **dfine-nano** zum Anfangen; Small/Medium erst ab einigen hundert Bildern |
+| Modell | **dfine-nano** oder **yolo26n** zum Anfangen; Small/Medium erst ab einigen hundert Bildern |
 | Epochen | 50–100 (Vorgabe 80) |
 | Bildgröße | 640; **960**, wenn das Objekt klein im Bild ist |
 | Validierung | 20 % — dieser Teil wird nicht trainiert, nur gemessen |
@@ -443,6 +466,30 @@ Vorhersage.
 **Zu wenige Epochen** erkennt man an den Beispielbildern: das Modell meldet
 dann noch, was es aus seinem Vortraining kennt — Kennzeichen, Rücklichter —
 statt der Kupplung.
+
+**YOLO26** steht in derselben Liste (`yolo26n`, `yolo26s`, `yolo26m`) —
+Ultralytics muss dafür installiert sein (`installieren.bat yolo` bzw.
+`requirements-yolo.txt`). Die Stapelgröße wählt es selbst nach dem freien
+Grafikspeicher; auf einer 6-GB-Karte gehen n und s bequem. Die Gewichte
+liegen danach als `gewichte\best.pt`, dazu Ultralytics' eigene Bilder
+(`val_batch0_pred.jpg`, `results.png`) im Lauf. **Lizenz:** AGPL-3.0, und
+Ultralytics zählt die trainierten Gewichte dazu — für eigene Versuche
+gleichgültig, für ein weitergegebenes Modell nicht. Dann lieber D-FINE.
+
+**Training auf einem zweiten Rechner.** Erzeugen und Labeln auf dem einen
+Rechner (oder per Cloud), Trainieren auf einem anderen — etwa einem Notebook
+mit RTX 1000 Ada (6 GB), eingerichtet mit `einrichten.bat training`:
+
+1. Auf dem ersten Rechner den ganzen Projektordner kopieren:
+   `projekte\<Projekt>\` (darin `projekt.json` und `datensatz\`).
+2. Auf dem Trainingsrechner nach `projekte\` legen und `start.bat` starten.
+3. Kopfzeile › Projekt wählen, Reiter **Training**, `yolo26n` oder
+   `yolo26s`, Bildgröße 640.
+
+Gemessen bei 640 px: yolo26n mit Stapel 16 und yolo26s mit Stapel 8 belegen
+je rund 2,8 GB — auf 6 GB bleibt Luft. Bei 960 px wählt Ultralytics auf einer
+6-GB-Karte von selbst einen kleineren Stapel. Die Gewichte liegen danach
+unter `projekte\<Projekt>\detektor\<Lauf>\gewichteest.pt`.
 
 ### Schritt 5 — am Foto ausprobieren
 
@@ -492,6 +539,63 @@ Der Datensatz selbst liegt in `projekte/<Projekt>/datensatz/` und ist
   erzeugten Bildern echte Objekte findet.
 - **Abwechslung:** Kamera, Licht, Umgebung würfeln lassen — aber Stil auf
   Foto.
+
+---
+
+## 7a. Trainingsdaten aus echten Fotos
+
+Der kurze Weg, wenn es schon Fotos gibt — etwa von einem Auto mit
+Anhängerkupplung. Reiter **Fotodaten**:
+
+1. **Fotos** wählen, eines oder viele. Am besten über jedes Objekt mit der
+   Maus **eine Box ziehen** (grün). Ein Foto mit Box geht sofort als
+   aufgenommen in den Datensatz und ist der Bezug für seine Varianten; ohne
+   Box sucht der Erkenner sie wie bei jedem anderen Bild.
+2. **Klasse** (`anhaengerkupplung`), **Suchbegriff** (`tow hitch`),
+   **Motivart**, und bei der Farbachse, **was umgefärbt wird**
+   (`the car body`). Unter **Was unverändert bleiben muss** das Objekt
+   selbst — „The black tow hitch with the ball neck and its socket“.
+3. **Achsen** anhaken und je Achse die Werte wählen:
+
+   | Achse | ändert |
+   |---|---|
+   | Farbe | die Farbe des Fahrzeugs (bzw. was oben als Ziel steht) |
+   | Untergrund / Umgebung | Schotter, Schnee, Tiefgarage, Waldweg … |
+   | Kameraposition | bodennah, schräg von links, erhöht, nah … |
+   | Licht | goldene Stunde, Neon, Gegenlicht, Nebel … |
+   | Farbstimmung, Kameraart, Werkstoff | wahlweise dazu |
+
+   Nicht angehakte Achsen bleiben wie im Foto. Der Stil steht fest auf Foto.
+4. **Plan** wählen:
+
+   | Plan | was entsteht |
+   |---|---|
+   | einzeln | jede Achse allein, jeder Wert genau einmal — zeigt sauber, was eine Achse tut |
+   | kombiniert | alle Achsen zugleich, *Kombinierte je Foto* Bilder; jeder Wert kommt gleich oft dran, keine Kombination doppelt |
+   | einzeln und kombiniert | beides hintereinander (Vorgabe) |
+   | alle Kombinationen | das volle Kreuzprodukt, höchstens 500 je Foto |
+
+   Unter dem Plan steht, wie viele Bilder das ergibt — bei einem
+   Cloud-Bildmodell ist das auch die Zahl der bezahlten Bilder.
+5. Großer Knopf **Fotodaten erzeugen**.
+
+Erst rechnet das Bildmodell alle Fotos durch, danach laden die
+Box-Erkenner einmal für alles. Am Ende meldet die Statuszeile z. B.
+„Datensatz: 24 aufgenommen, 6 zu prüfen“. Weiter wie in Schritt 3
+(Prüfliste) und Schritt 4 (Training).
+
+**Gut zu wissen**
+
+- **Handyfotos** werden nach ihrem EXIF-Vermerk aufgerichtet, so wie der
+  Browser sie zeigt. Große Fotos werden auf 2048 px verkleinert.
+- Original und Varianten eines Fotos heißen `<Zeit>_fotoNN_…` und bleiben
+  beim Training **zusammen** in Training oder Validierung.
+- **Kameraposition** wirkt schwächer als Farbe und Umgebung: das Bildmodell
+  hält sich eng an die Bildaufteilung der Vorlage. Echte Vielfalt im
+  Blickwinkel kommt von Fotos aus verschiedenen Winkeln.
+- Im Datensatz liegt zusätzlich **`attribute.csv`**: je Bild die Box, ob
+  echt oder erzeugt, aus welchem Foto, und jede Achse (Farbe, Untergrund,
+  Licht …) — die Merkmal-Labels.
 
 ---
 
@@ -628,6 +732,36 @@ eigenes vLLM …
 | API-Schlüssel | einmal eintragen; leer lassen behält den hinterlegten |
 | Bildgröße (nur Bild) | *genau wie lokal*; bei OpenAI-Bildmodellen *nächstes OpenAI-Format* |
 
+**Anbieter vorbelegen:** ein Klick auf **franconia.ai** (oder OpenAI) füllt
+Adresse, beide Modelle und die Art des Bildmodells aus — danach nur noch den
+Schlüssel eintragen. Zeigen beide Plätze auf dieselbe Adresse, reicht der
+Schlüssel in einem Feld.
+
+| franconia.ai | |
+|---|---|
+| Basisadresse | `https://api.franconia.ai/v1` |
+| Bildmodell | `Z Image Turbo` |
+| Sprachmodell | `Qwen 3.8 27B` |
+| Schlüssel | `sk-sovai-…`, im Dashboard unter franconia.ai erstellen |
+| Das Modell versteht | **Beschreibungen** |
+
+**Anweisung oder Beschreibung.** Ein Bearbeitungsmodell (gpt-image,
+Qwen-Image) versteht „färbe das Auto rot, lass die Kupplung, wie sie ist“.
+Z Image Turbo ist ein Text-zu-Bild-Modell und arbeitet mit Vorlage als
+**img2img**: es malt die Vorlage nach dem Prompt neu. Steht das Feld auf
+*Beschreibungen*, beschreibt das Sprachmodell jedes Foto einmal, und das
+Bildmodell bekommt das Zielbild in Worten („a vintage station wagon seen
+from behind …, the car body is bright red, standing on a gravel yard“). Die
+**Stärke** sagt, wie weit es sich von der Vorlage entfernen darf: um 0,4
+wechseln Farbe und Licht, ab 0,7 auch der Untergrund — dann verschieben sich
+eher die Umrisse, und die Box-Erkenner schicken mehr Bilder auf die
+Prüfliste. Die Kameraposition ändert img2img praktisch nicht; dafür Fotos
+aus verschiedenen Winkeln mitbringen.
+
+Bei franconia.ai gehen **Seed und Schritte** mit, Cloud-Bilder sind dort also
+wiederholbar. Vorlagen werden auf Kanten in Vielfachen von 16 gebracht (die
+Schnittstelle verlangt das) und höchstens 1536 px groß verschickt.
+
 **Speichern**, dann **Verbindung prüfen**. Ist ein Platz aktiv, steht in der
 Kopfzeile z. B. „Cloud: Sprache + Bild“.
 
@@ -636,8 +770,9 @@ Gut zu wissen:
 - Der Schlüssel liegt in `einstellungen.json` neben dem Programm, nur für dich
   lesbar und **nicht** im Repository. An die Seite geht er nie zurück.
 - Einstellen lässt sich das nur am Rechner des Servers, nicht übers Netz.
-- **Cloud-Bilder kosten Geld** und sind nicht wiederholbar: Seed und
-  „Was nicht ins Bild soll … auch dem Modell ausreden“ wirken dort nicht.
+- **Cloud-Bilder kosten meist Geld** (franconia.ai ist in der Beta kostenlos,
+  100 Anfragen je Minute). Seed und Schritte wirken nur, wo der Anbieter sie
+  kennt; „auch dem Modell ausreden“ wirkt in der Cloud nicht.
 - Die Box-Erkennung für Trainingsdaten und das Detektor-Training laufen immer
   lokal.
 
@@ -679,6 +814,24 @@ beenden und neu starten:
 ss -ltnp | grep 7860          # zeigt die Prozessnummer (pid=…)
 kill <pid> && ./start.sh
 ```
+
+Unter Windows heißt die Meldung `[WinError 10048]`:
+
+```bat
+netstat -ano | findstr :7860   &rem letzte Spalte ist die Prozessnummer
+taskkill /PID <pid> /F
+```
+
+**Windows: „Eine Anwendungssteuerungsrichtlinie hat diese Datei blockiert“**
+Smart App Control oder eine Firmenrichtlinie sperrt `pip.exe`.
+`installieren.bat` ruft pip deshalb als `python -m pip` auf; von Hand genauso.
+
+**Erster Auftrag lädt ewig, die Karte bleibt fast leer**
+Auf Hugging Face ist ein neuer Stand von Qwen-Image erschienen, und das
+Programm lädt erst die geänderten Teile (beim Text-Encoder 17 GB). Den
+vorhandenen Stand festhalten: in `lokal.bat`
+`set "QWEN_IMAGE_REVISION=<Commit>"` — der Commit ist der Ordnername unter
+`%USERPROFILE%\.cache\huggingface\hub\models--Qwen--Qwen-Image-2.1\snapshots`.
 
 **Plötzlich Menschen in Varianten-Bildern**
 „Serie variieren“ stand auf *alles würfeln* und hat Körperhaltung, Kleidung

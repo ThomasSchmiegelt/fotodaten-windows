@@ -24,7 +24,7 @@ from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from engine import (  # noqa: E402
-    ASPECT_RATIOS, MAX_REFERENCES, REFERENCE_TOKEN_BUDGET, dimensions_for,
+    ASPECT_RATIOS, LOKAL, MAX_REFERENCES, REFERENCE_TOKEN_BUDGET, dimensions_for,
 )
 # Die eigentliche Arbeit steht in auftraege.py -- hier nur Routen und Start.
 from auftraege import (  # noqa: E402
@@ -42,6 +42,7 @@ import demo  # noqa: E402
 import cloud  # noqa: E402
 import datensatz  # noqa: E402
 import detektor  # noqa: E402
+import fotodaten  # noqa: E402
 import sechsseiten  # noqa: E402
 import retusche  # noqa: E402
 import vervielfaeltigen  # noqa: E402
@@ -63,8 +64,34 @@ GESPRAECH_LAENGE = 12
 HOST = os.environ.get("QWEN_HOST", "127.0.0.1")
 PORT = int(os.environ.get("QWEN_PORT", "7860"))
 SAFE_NAME = re.compile(r"[\w.\-]+\.(png|jsonl|mp4)")
+WINDOWS = os.name == "nt"
+
+
+def _gimp_suchen() -> str:
+    """Der GIMP-Befehl. Unter Windows steht GIMP nicht im Suchpfad.
+
+    Der Installer legt es unter "C:\\Program Files\\GIMP 3\\bin" ab, die
+    ausfuehrbare Datei heisst nach der Version (gimp-3.exe, gimp-3.2.exe).
+    Die Konsolenfassung oeffnet kein Fenster und faellt deshalb heraus.
+    """
+    if os.environ.get("QWEN_GIMP"):
+        return os.environ["QWEN_GIMP"]
+    if not WINDOWS:
+        return "gimp"
+    import glob
+    for wurzel in (os.environ.get("ProgramFiles", r"C:\Program Files"),
+                   os.environ.get("LOCALAPPDATA", "") + r"\Programs"):
+        treffer = sorted(p for p in glob.glob(os.path.join(wurzel, "GIMP*", "bin", "gimp*.exe"))
+                         if "console" not in os.path.basename(p).lower()
+                         and re.fullmatch(r"gimp(-\d+(\.\d+)*)?\.exe",
+                                          os.path.basename(p).lower()))
+        if treffer:
+            return treffer[-1]
+    return "gimp"
+
+
 # Fester Befehl, keine Shell: der Aufruf kann nur eine Datei aus outputs/ oeffnen.
-GIMP_CMD = os.environ.get("QWEN_GIMP", "gimp")
+GIMP_CMD = _gimp_suchen()
 
 
 
@@ -309,6 +336,8 @@ class Handler(BaseHTTPRequestHandler):
             info["axis_off"] = AXIS_OFF
             info["paint_target"] = PAINT_TARGET
             info["gimp"] = {"available": bool(shutil.which(GIMP_CMD)), "command": GIMP_CMD}
+            # Ohne torch/diffusers (die portable Fassung) geht nur die Cloud.
+            info["lokal"] = LOKAL
             now = _source_state()
             changed = sorted(k for k in set(now) | set(SOURCE_AT_START)
                              if now.get(k) != SOURCE_AT_START.get(k))
@@ -1063,6 +1092,49 @@ class Handler(BaseHTTPRequestHandler):
                                         "hoehe": bild.size[1]})
             return self._json(400, {"error": "unbekannt"})
 
+        if path == "/api/fotodaten":
+            # Echte Fotos zu Trainingsdaten -- siehe fotodaten.py. "katalog"
+            # liefert die Achsen der Motivart, "plan" zaehlt vorab, wie viele
+            # Bilder entstehen, "starten" reiht den Auftrag ein.
+            params = self._body()
+            if params is None:
+                return self._json(400, {"error": "ungueltiges JSON"})
+            was = params.get("tu") or "katalog"
+            subject = params.get("subject") or "fahrzeug"
+            if was == "katalog":
+                return self._json(200, {"achsen": fotodaten.katalog(subject),
+                                        "namen": fotodaten.ACHSEN,
+                                        "arten": list(fotodaten.ARTEN),
+                                        "max_alle": fotodaten.MAX_ALLE,
+                                        "cloud": bool(cloud.aktiv("bild")),
+                                        "lokal": LOKAL})
+            try:
+                belegung = fotodaten.plan(params.get("achsen") or {},
+                                          params.get("art") or "beides",
+                                          int(params.get("anzahl") or 12), 0, subject)
+            except ValueError as exc:
+                return self._json(400, {"error": str(exc)})
+            if was == "plan":
+                return self._json(200, {"je_foto": len(belegung),
+                                        "beispiele": belegung[:6]})
+            if was == "starten":
+                fotos = [f for f in (params.get("fotos") or []) if f.get("bild")]
+                if not fotos:
+                    return self._json(400, {"error": "Bitte mindestens ein Foto wählen"})
+                if not str(params.get("klasse") or "").strip():
+                    return self._json(400, {"error": "Bitte eine Klasse angeben, z. B. anhaengerkupplung"})
+                if "paint" in (params.get("achsen") or {}) \
+                        and not str(params.get("paint_target") or "").strip():
+                    return self._json(400, {"error": "Die Farbachse braucht ein Ziel — "
+                                            "was soll umgefärbt werden, z. B. „die Karosserie“"})
+                if not LOKAL and not cloud.aktiv("bild"):
+                    return self._json(400, {"error": "Kein Bildmodell: bitte unter "
+                                            "Cloud-Modelle eines eintragen und einschalten"})
+                nummer = einreihen("fotodaten", params)["nummer"]
+                return self._json(202, {"ok": True, "nummer": nummer,
+                                        "bilder": len(belegung) * len(fotos)})
+            return self._json(400, {"error": "unbekannt"})
+
         if path == "/api/datensatz":
             # Die Pruefliste: ansehen, aufnehmen, verwerfen, Box neu setzen.
             params = self._body()
@@ -1099,7 +1171,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(400, {"error": "ungueltiges JSON"})
             was = params.get("tu") or "lesen"
             if was == "lesen":
-                return self._json(200, cloud.oeffentlich())
+                return self._json(200, {**cloud.oeffentlich(),
+                                        "vorlagen": cloud.VORLAGEN})
             if not self._nur_hier():
                 return self._json(403, {"error": "Nur vom Rechner des Servers aus"})
             if was == "speichern":
@@ -1233,13 +1306,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(404, {"error": "Bild nicht gefunden"})
             if not shutil.which(GIMP_CMD):
                 return self._json(501, {"error": f"{GIMP_CMD} ist nicht installiert"})
-            if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+            if not WINDOWS and not (os.environ.get("DISPLAY")
+                                    or os.environ.get("WAYLAND_DISPLAY")):
                 return self._json(501, {"error":
                     "Der Server sieht keine Anzeige. start.sh aus einer Desktop-Sitzung starten."})
             try:
+                # Losgeloest vom Server: GIMP soll weiterlaufen, wenn das
+                # Konsolenfenster des Servers geschlossen wird.
+                eigen = ({"creationflags": subprocess.DETACHED_PROCESS
+                          | subprocess.CREATE_NEW_PROCESS_GROUP} if WINDOWS
+                         else {"start_new_session": True})
                 subprocess.Popen(
-                    [GIMP_CMD, target], start_new_session=True,
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    [GIMP_CMD, target], stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL, **eigen)
             except OSError as exc:
                 return self._json(500, {"error": f"GIMP liess sich nicht starten: {exc}"})
             return self._json(200, {"ok": True})

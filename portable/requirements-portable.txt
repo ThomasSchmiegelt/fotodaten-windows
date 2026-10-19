@@ -1,0 +1,4 @@
+# Grundstufe der portablen Fassung: nur Cloud-Bildmodell. Der Server selbst
+# braucht nur die Standardbibliothek, dazu Pillow und NumPy.
+pillow==12.3.0
+numpy==2.5.2

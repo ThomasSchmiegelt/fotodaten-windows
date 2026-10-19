@@ -29,3 +29,19 @@ __pycache__/
 # Cloud-Zugaenge samt API-Schluessel -- gehoeren nie ins Repository
 einstellungen.json
 
+
+# Windows: Protokolle der Einrichtung und des Servers
+pip_log.txt
+pip_yolo_log.txt
+server_log.txt
+
+# Heruntergeladene YOLO26-Gewichte und Ultralytics-Einstellungen
+modelle/
+
+# Einstellungen nur dieses Rechners (von start.bat gelesen)
+lokal.bat
+
+# Portable Einrichtung (einrichten.bat): eingebettetes Python und Modelle
+python/
+python-embed.zip
+daten/

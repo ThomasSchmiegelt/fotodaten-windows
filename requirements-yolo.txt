@@ -1,0 +1,9 @@
+# Optional: YOLO26 von Ultralytics fuer den Reiter Training.
+# AGPL-3.0 -- Ultralytics zaehlt die damit trainierten Gewichte mit dazu.
+# D-FINE (Apache 2.0) braucht dieses Paket nicht.
+ultralytics==8.4.182
+# polars 2.x laedt seine Laufzeit aus einer eigenen DLL, die Windows' Smart
+# App Control sperrt -- danach haengt der Import, und mit ihm das Training
+# (gemessen: kein Fehler, nur Stillstand nach "Polars binary is missing").
+# 1.31.0 laedt.
+polars==1.31.0

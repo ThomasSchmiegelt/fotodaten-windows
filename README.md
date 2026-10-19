@@ -9,6 +9,34 @@ erzeugen, Bounding Boxes automatisch setzen und prüfen, lokal
 vervielfältigen (die Box rechnet mit, das geht auch auf einer 4-GB-Karte),
 einen Detektor (D-FINE) trainieren.
 
+## Schnellstart unter Windows
+
+1. Repository herunterladen — **Code › Download ZIP** und entpacken, oder
+   `git clone`. Ein Ordner ohne Leerzeichen-Ärger, etwa `C:\qwen-image`.
+   Beim ZIP vor dem Entpacken: Rechtsklick › Eigenschaften › **Zulassen**
+   anhaken — sonst trägt jede Datei den Vermerk „aus dem Internet“, und
+   Windows (SmartScreen, Smart App Control) fragt nach oder sperrt.
+2. **`einrichten.bat`** doppelklicken. Es lädt ein eingebettetes Python von
+   python.org, alle Pakete und die Modelle — in **diesen Ordner**, ohne
+   Installation, ohne Adminrechte, ohne vorhandenes Python.
+3. **`start.bat`** doppelklicken. Der Browser öffnet `http://127.0.0.1:7860`.
+
+Danach ist der Ordner **portabel**: auf einen USB-Stick oder einen anderen
+Rechner kopieren und dort `start.bat` starten. Modelle, Einstellungen,
+Projekte und der API-Zugang liegen alle darin.
+
+| Aufruf | Für | Größe |
+|---|---|---|
+| `einrichten.bat` | Bilder per Cloud-API (etwa franconia.ai), Boxen und Training auf der eigenen Karte ab 6 GB | ~9 GB |
+| `einrichten.bat training` | nur Detektor-Training (YOLO26, D-FINE) — etwa ein Notebook mit RTX 1000 Ada; der Datensatz kommt fertig gelabelt von einem anderen Rechner | ~4 GB |
+| `einrichten.bat nurcloud` | nur Bilder per Cloud-API, keine Grafikkarte nötig | ~100 MB |
+| `einrichten.bat lokal` | dazu Qwen-Image 2.1 auf der eigenen Karte (~17 GB Grafikspeicher) | ~40 GB |
+
+Dahinter steht `portable/bauen.py --hier`; es darf mehrfach laufen — was
+schon da ist, wird nur geprüft. Am Ende lädt es einmal torch, transformers,
+Ultralytics und polars zur Probe: eine von Windows gesperrte DLL fällt so
+beim Einrichten auf und nicht erst mitten im Training.
+
 **Wie man damit arbeitet, steht in der [Bedienungsanleitung](ANLEITUNG.md).**
 Diese README erklärt, wie es gebaut ist und warum.
 
@@ -76,6 +104,62 @@ vervielfältigt, lädt dazu einmalig Stable Diffusion 1.5 und ein ControlNet
 `transformers`; das Training braucht zusätzlich `scipy` (steht in
 `requirements.txt`).
 
+### Unter Windows
+
+Der Weg für Anwender ist der [Schnellstart](#schnellstart-unter-windows).
+Für die Entwicklung gibt es daneben eine virtuelle Umgebung wie unter Linux:
+
+```bat
+installieren.bat            &rem venv qwen_bild, CUDA 13.0
+installieren.bat cu126 yolo &rem CUDA 12.6 (auch GTX 10xx), dazu Ultralytics
+start.bat                   &rem nimmt python\ (portabel) oder qwen_bild\
+```
+
+pip läuft immer als `python -m pip`: auf Rechnern mit Anwendungssteuerung
+(Smart App Control, WDAC) ist `pip.exe` gesperrt, `python.exe` nicht.
+`start.bat` setzt Python auf UTF-8, damit Umlaute in Meldungen und Dateien
+heil bleiben, und lädt Modelle über normales HTTP (`HF_HUB_DISABLE_XET`):
+der Xet-Weg von Hugging Face blieb hier gemessen bei 0 Byte stehen.
+
+**Smart App Control.** Ist es eingeschaltet, lässt Windows unsignierte DLLs
+nur mit bekannter Reputation laden. Gemessen:
+
+| Paket | Ergebnis |
+|---|---|
+| torch 2.14 für CUDA 13.0 | lädt |
+| torch 2.14 für CUDA 12.6 | „Eine Anwendungssteuerungsrichtlinie hat diese Datei blockiert" (`c10.dll`) |
+| polars 2.0 | Laufzeit-DLL gesperrt — der Import **hängt** ohne Fehlermeldung, mit ihm das YOLO-Training |
+| polars 1.31.0 | lädt |
+
+Deshalb ist cu130 die Vorgabe (GTX 16xx, RTX 20xx bis 50xx, auch RTX 1000
+Ada) und polars auf 1.31.0 festgelegt; cu126 nur für eine GTX 10xx und nur
+ohne Smart App Control.
+
+**Ein neuer Stand von Qwen-Image auf dem Hub** lädt beim nächsten Auftrag
+stillschweigend die geänderten Teile nach — beim Text-Encoder 17 GB.
+`QWEN_IMAGE_REVISION` hält einen Stand fest; die portable Einrichtung mit
+`lokal` setzt den, gegen den der diffusers-Commit geprüft ist.
+
+Das GIMP-Plugin kopiert `gimp\install.bat` nach
+`%APPDATA%\GIMP\<Version>\plug-ins`; „In GIMP öffnen" findet GIMP unter
+`Program Files` bzw. `%LOCALAPPDATA%\Programs` selbst.
+
+Unterschiede zu Linux, alle im Code abgefangen: `expandable_segments` gibt
+es für PyTorch unter Windows nicht und wird dort nicht gesetzt; ein
+abgebrochenes Training wird mit `taskkill /T` samt Lader-Prozessen beendet,
+`terminate()` erreichte nur den Hauptprozess.
+
+### Portabel und nur Cloud
+
+Ohne `einrichten.bat lokal` rechnet das Bildmodell nie auf der eigenen
+Karte: `start.bat` setzt dann `QWEN_NUR_CLOUD=1`, und `engine.py` lädt torch
+und diffusers für das Bildmodell gar nicht erst. Bilder kommen dann vom
+Cloud-Bildmodell (Kopfzeile › Cloud-Modelle). Ohne torch — Stufe
+`nurcloud` — startet derselbe Code als reine Cloud-Fassung.
+
+Eine Kopie in einen anderen Ordner baut
+`python portable\bauen.py D:\ziel [--training|--nurcloud|--lokal]`.
+
 ## Starten
 
 ```bash
@@ -136,6 +220,26 @@ kühl, warm) und braucht kein Ziel. Ohne sie bestimmen Umgebung und Licht die
 Palette allein, und die sind erdlastig — daher der frühere Braunstich. Was umgefärbt wird, beschreibst du selbst
 (`the vehicle body`, `the person's coat`), ebenso was unverändert bleiben muss.
 Neben den Bildern entsteht ein `*.jsonl`-Manifest mit einer Zeile je Variante.
+
+**Fotodaten** — Trainingsdaten aus **echten** Fotos, in einem Auftrag:
+Fotos hochladen, die Box wahlweise von Hand ziehen, je Achse (Farbe,
+Untergrund, Kameraposition, Licht, Farbstimmung, Kameraart, Werkstoff) die
+Werte wählen. Ein **Plan** statt Würfeln (`webui/fotodaten.py`):
+*einzeln* — jede Achse allein, jeder Wert genau einmal, der Rest wie im
+Foto; *kombiniert* — alle Achsen zugleich, ausgewogen, jeder Wert gleich oft
+und keine Kombination doppelt, solange es freie gibt; *beides*; *alle* —
+das Kreuzprodukt, höchstens 500. Erst rechnet das Bildmodell alle Fotos,
+dann laden die Box-Erkenner einmal für alles. Das Original geht mit in den
+Datensatz — das wertvollste Bild darin; mit Box von Hand wird es sofort
+aufgenommen und ist der Bezug für seine Varianten. Original und Varianten
+heißen `<stempel>_fotoNN_…` und bleiben beim Training geschlossen auf einer
+Seite von train/val. Handyfotos werden nach ihrem EXIF-Vermerk aufgerichtet
+(gilt für alle Uploads), sonst läge das Auto für das Modell auf der Seite
+und die gezogene Box daneben.
+
+Neben YOLO und COCO schreibt der Datensatz jetzt `attribute.csv`: je Bild
+Box, Status, echt/erzeugt, Herkunftsfoto und jede Achse — zum Ausbalancieren
+oder für einen Klassifikator auf Farbe, Untergrund, Licht.
 
 **Serien** mit 1–20 Bildern. Variieren nach Umrundung, Kameraperspektive, Stil
 oder Lichtstimmung — der Reihe nach oder gewürfelt. Optional derselbe Seed für
@@ -558,6 +662,10 @@ nicht gelesen.
 | `QWEN_GIMP` | `gimp` | Befehl für „In GIMP öffnen" |
 | `QWEN_BOX_MODELL` | `Qwen/Qwen3-VL-2B-Instruct` | setzt die Bounding Box |
 | `QWEN_BOX_PRUEFER` | `IDEA-Research/grounding-dino-base` | prüft die Box gegen |
+| `QWEN_BOX_GERAET` | je nach Karte | `cpu` oder `cuda` für Qwen3-VL |
+| `QWEN_NUR_CLOUD` | – | `1`: Bildmodell nie lokal laden (portable Fassung) |
+| `QWEN_YOLO_ORDNER` | `modelle/yolo` | YOLO26-Gewichte und -Einstellungen |
+| `QWEN_YOLO_BATCH` | `0.6` | Stapelgröße; unter 1 als Anteil des Grafikspeichers |
 
 Cloud-Zugänge stehen nicht in Umgebungsvariablen, sondern in
 `einstellungen.json` (Rechte 600, in `.gitignore`) — eingetragen über
@@ -659,6 +767,13 @@ webui/datensatz.py    Bounding Boxes (Qwen3-VL + Grounding DINO), YOLO/COCO
 webui/vervielfaeltigen.py  aus gepruefte Bildern viele, die Box rechnet mit
 webui/detektor.py     Detektor-Training (D-FINE): Aufteilung, Laeufe, Ausprobieren
 webui/detektor_lauf.py  das Training selbst, als eigener Prozess; mAP-Berechnung
+webui/yolo_lauf.py    YOLO26-Training (Ultralytics), ebenfalls eigener Prozess
+webui/fotodaten.py    echte Fotos: Plan der Varianten, EXIF, Box umrechnen
+webui/browser_oeffnen.py  Browser oeffnen, sobald der Server antwortet (start.bat)
+einrichten.bat        portable Einrichtung unter Windows (laedt Python, Pakete, Modelle)
+start.bat             Start unter Windows (portabel oder venv)
+installieren.bat      venv qwen_bild fuer die Entwicklung unter Windows
+portable/             bauen.py (von einrichten.bat aufgerufen) und Paketlisten
 webui/ablauf.py       Abläufe als Blöcke, mitgelieferte Folgen
 webui/demo.py         Startbild-Vorgabe und Videobau
 webui/pruefung.py     Oberfläche gegen den Server prüfen
@@ -712,6 +827,7 @@ ersten Gebrauch, und es gilt jeweils deren eigene Lizenz.
 | Qwen3-VL-2B-Instruct | Bounding Box setzen | Apache 2.0 | ja |
 | Grounding DINO (base) | Bounding Box gegenprüfen | Apache 2.0 | ja |
 | D-FINE (nano/small/medium, COCO) | Detektor trainieren | Apache 2.0 | ja — auch die trainierten Gewichte |
+| Ultralytics YOLO26 (optional) | Detektor trainieren | AGPL-3.0 | nur mit Enterprise-Lizenz — gilt nach Ultralytics auch für die Gewichte |
 | Stable Diffusion 1.5 | Datensatz vervielfältigen (neue Umgebung) | CreativeML OpenRAIL-M | ja, mit den Nutzungsbeschränkungen der Lizenz |
 | ControlNet 1.1 Canny (lllyasviel) | dabei die Umrisse festhalten | OpenRAIL | ja, mit Nutzungsbeschränkungen |
 | diffusers, transformers, accelerate, huggingface_hub, safetensors | Grundlage | Apache 2.0 | ja |
@@ -727,6 +843,14 @@ dazu: ein Detektor aus diesem Werkzeug wäre selbst AGPL oder bräuchte deren
 kostenpflichtige Lizenz. D-FINE ist ein Echtzeit-Detektor derselben Klasse
 unter Apache 2.0, und es kommt mit `transformers`, das ohnehin installiert
 ist. Der Datensatz wird trotzdem auch im YOLO-Format abgelegt.
+
+**YOLO26 gibt es trotzdem**, auf Wunsch und daneben: im Reiter Training
+stehen `yolo26n/s/m` neben D-FINE (`webui/yolo_lauf.py`, `requirements-yolo.txt`).
+Für eigene Versuche und interne Auswertung ist die AGPL gleichgültig; wer
+ein damit trainiertes Modell weitergibt oder in ein Produkt einbaut, braucht
+die Lizenz von Ultralytics — oder nimmt D-FINE. Beide bekommen dieselbe
+Aufteilung in train und val und schreiben dieselben Kennzahlen, ein Lauf ist
+mit dem anderen vergleichbar.
 
 **Für die Kette Trainingsdaten → Detektor heißt das:** Das Training und die
 Gewichte sind frei. Die *Bilder* aber stammen von Qwen-Image 2.1 — wer einen
