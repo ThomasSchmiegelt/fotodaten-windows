@@ -43,6 +43,7 @@ import datensatz  # noqa: E402
 import detektor  # noqa: E402
 import fotodaten  # noqa: E402
 import vorbehandeln  # noqa: E402
+import kennzeichen  # noqa: E402
 import sechsseiten  # noqa: E402
 import retusche  # noqa: E402
 import vervielfaeltigen  # noqa: E402
@@ -615,7 +616,17 @@ def run_fotodaten(params: dict) -> None:
                 box = list(maske.getbbox())
             # Der gemalte Boden: dort kommt bei der Achse Untergrund die
             # neue Sorte hinein (vorbehandeln.boden).
-            boden = fotodaten.maske_lesen(decode(foto["boden"]), bild.size)                 if foto.get("boden") else None
+            boden = fotodaten.maske_lesen(decode(foto["boden"]), bild.size) \
+                if foto.get("boden") else None
+            # Die vier Ecken des Kennzeichens: dort kommt in jedes Bild ein
+            # neues, zufaelliges (kennzeichen.py).
+            ecken = fotodaten.ecken_umrechnen(foto.get("kennzeichen"), tuple(anzeige), bild.size) \
+                if params.get("kennzeichen", True) and kennzeichen.verfuegbar() else None
+            if ecken and params.get("kennzeichen_original", True):
+                # Auch im Original -- das echte Kennzeichen soll nicht in den
+                # Datensatz, und das Bildmodell sieht so gleich ein sauberes.
+                bild = kennzeichen.einsetzen(bild, ecken, kennzeichen.zeichnen(
+                    kennzeichen.zufall(random.Random(seed + nr))))
             name_original = None
             if params.get("original", True):
                 # Nummer 00 vor den Varianten: so steht das Original in der
@@ -637,26 +648,26 @@ def run_fotodaten(params: dict) -> None:
             vorrat = {}
 
             def vorbereitet(achsen, _bild=bild, _maske=maske, _boden=boden,
-                            _vorrat=vorrat):
+                            _ecken=ecken, _vorrat=vorrat):
                 wahl = {k: achsen.get(k) for k in ("angle", "paint", "scene", "light")}
                 schluessel = tuple(wahl.values())
                 if schluessel not in _vorrat:
                     if len(_vorrat) > 3:
                         _vorrat.clear()
                     _vorrat[schluessel] = vorbehandeln.anwenden(
-                        _bild, wahl, _maske, _boden, untergrund)
+                        _bild, wahl, _maske, _boden, untergrund, _ecken)
                 return _vorrat[schluessel]
 
             def on_image(meta, image, _kind=kind, _liste=entstanden, _maske=maske,
-                         _bild=bild, _vorbereitet=vorbereitet):
+                         _bild=bild, _ecken=ecken, _vorbereitet=vorbereitet):
                 meta = dict(meta, foto=_kind)
-                if meta.get("vorbehandelt") and _maske is not None:
+                if meta.get("vorbehandelt"):
                     # Eingesetzt wird aus der Vorlage, die das Modell sah:
                     # die Kupplung ist darin dieselbe, sitzt aber dort, wohin
                     # die Kamera sie geschoben hat, und was die Maske vom Lack
                     # streift, hat schon die neue Farbe.
-                    _bild, _maske = _vorbereitet({k: engine_achse(meta.get(k)) for k in
-                                                  ("angle", "paint", "scene", "light")})
+                    _bild, _maske, _ecken = _vorbereitet(
+                        {k: engine_achse(meta.get(k)) for k in ("angle", "paint", "scene", "light")})
                 if _maske is not None and params.get("bewahren", True):
                     # Die Originalpixel zurueck -- siehe fotodaten.bewahren.
                     # Nur wenn die Stelle sicher gefunden ist: hat das
@@ -673,6 +684,9 @@ def run_fotodaten(params: dict) -> None:
                     # verschoben -- eingesetzt stuende sie doppelt im Bild.
                     if lage >= datensatz.LAGE_SICHER and eindeutig:
                         image, meta["box_bekannt"] = neu, box_neu
+                if _ecken:
+                    image, meta["kennzeichen"] = fotodaten.kennzeichen_neu(
+                        _bild, _ecken, image, meta.get("seed"))
                 name = _save(meta, image, stamp, _kind)
                 current["files"].append(name)
                 _liste.append((os.path.join(ziel(), name), meta))

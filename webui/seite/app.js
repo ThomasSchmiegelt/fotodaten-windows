@@ -27,6 +27,7 @@ const MODES = {
   training: {label: "Detektor trainieren", refs: 0, ph: "", hint: () => ""},
   fotodaten: {label: "Fotodaten erzeugen", refs: 0, ph: "", hint: () => ""},
   anleitung: {label: "Mit Schritt 1 anfangen", refs: 0, ph: "", hint: () => ""},
+  zusammen: {label: "Zusammenführen", refs: 0, ph: "", hint: () => ""},
   retusche: {label: "Retuschieren", refs: 0, ph: "", hint: () => ""},
   varianten: {label: "Varianten erzeugen", refs: 1, sweep: "varianten", count: 12,
               follow: true, lock: false,
@@ -301,6 +302,9 @@ function setMode(next) {
   if (istFotodaten) fdHolen();
   const istAnleitung = next === "anleitung";
   $("anleitungBox").style.display = istAnleitung ? "block" : "none";
+  const istZusammen = next === "zusammen";
+  $("zusammenBox").style.display = istZusammen ? "block" : "none";
+  if (istZusammen) zfHolen();
   wegZeigen();
   const istRetusche = next === "retusche";
   $("retuscheBox").style.display = istRetusche ? "block" : "none";
@@ -310,7 +314,7 @@ function setMode(next) {
   // Kaesten nicht -- Prompt, Darstellung, Bildgroesse.
   const eigen = istDemo || istBausteine || istSzenen || istGeschichte
                 || istKatalog || istSeiten || istDatensatz || istTraining
-                || istRetusche || istFotodaten || istAnleitung;
+                || istRetusche || istFotodaten || istAnleitung || istZusammen;
   eigenerReiter = eigen;
   $("demoBox").style.display = istDemo ? "block" : "none";
   $("bausteinBox").style.display = istBausteine ? "block" : "none";
@@ -936,6 +940,7 @@ async function start() {
 }
 $("go").onclick = () => {
   if (mode === "anleitung") return setMode("fotodaten");
+  if (mode === "zusammen") return zfStarten();
   if (mode === "demo") return starteDemo();
   if (mode === "seiten") return seitenStarten();
   if (mode === "datensatz") return datensatzHolen();
@@ -3796,7 +3801,7 @@ $("detBild").onchange = () => {
 // Vier Reiter der Reihe nach (Anleitung, Fotodaten, Pruefen, Trainieren).
 // Die Zeile darunter sagt, wo das Projekt steht und was als Naechstes
 // kommt -- mit einem Verweis genau dorthin.
-const WEG = ["anleitung", "fotodaten", "datensatz", "training"];
+const WEG = ["anleitung", "fotodaten", "datensatz", "zusammen", "training"];
 
 async function wegZeigen() {
   const el = $("wegStand");
@@ -3815,7 +3820,8 @@ async function wegZeigen() {
   if (pruefen) weiter = ["datensatz", `2 · ${pruefen} Bild(er) prüfen`];
   else if (!ok && !fotos) weiter = ["fotodaten", "1 · Fotos laden und ausmalen"];
   else if (!ok) weiter = ["fotodaten", "1 · Fotodaten erzeugen (großer Knopf unten)"];
-  else if (!fertig.length) weiter = ["training", "3 · Detektor trainieren"];
+  else if (!fertig.length) weiter = ["training", "4 · Detektor trainieren "
+                                       + "(oder vorher 3 · weitere Projekte zusammenführen)"];
   else weiter = ["training", "unten bei Ausprobieren ein echtes Foto testen"];
   el.innerHTML = `Projekt <b>${esc(ds.projekt || "allgemein")}</b>: `
     + (fotos ? `${fotos} Foto(s) geladen, ${gemalt} ausgemalt · ` : "")
@@ -3824,6 +3830,71 @@ async function wegZeigen() {
                      : "noch nicht trainiert")
     + `<br><b>Als Nächstes:</b> <a href="#" data-geh="${weiter[0]}">${weiter[1]} →</a>`;
   el.style.display = "block";
+}
+
+// ---------- Zusammenfuehren: mehrere Projekte zu einem Trainingssatz ----------
+let ZFPROJEKTE = [], ZFWAHL = new Set();
+
+async function zfHolen() {
+  const g = await dsRuf({tu: "projekte"});
+  if (!g) return;
+  ZFPROJEKTE = g.projekte || [];
+  const aktiv = g.aktiv;
+  // Vorgewaehlt: was schon einmal ins aktive Projekt zusammengefuehrt wurde,
+  // sonst nichts -- man soll bewusst waehlen.
+  const ziel = ZFPROJEKTE.find(p => p.key === aktiv);
+  if (!ZFWAHL.size && ziel && ziel.aus.length) ziel.aus.forEach(k => ZFWAHL.add(k));
+  $("zfZiel").innerHTML = `<option value="neu">— neues Projekt —</option>`
+    + ZFPROJEKTE.map(p => `<option value="${p.key}"${ziel && ziel.aus.length && p.key === aktiv
+        ? " selected" : ""}>${esc(p.label)} (${p.aufgenommen} aufgenommen)</option>`).join("");
+  zfZeigen();
+}
+
+function zfZeigen() {
+  const ziel = $("zfZiel").value;
+  $("zfNameZeile").style.display = ziel === "neu" ? "" : "none";
+  $("zfListe").innerHTML = ZFPROJEKTE.filter(p => p.aufgenommen || ZFWAHL.has(p.key))
+    .map(p => `<label class="check zfprojekt${p.key === ziel ? " zfaus" : ""}">
+      <input type="checkbox" ${ZFWAHL.has(p.key) && p.key !== ziel ? "checked" : ""}
+        ${p.key === ziel ? "disabled" : ""}
+        onchange="this.checked ? ZFWAHL.add('${p.key}') : ZFWAHL.delete('${p.key}'); zfZeigen()">
+      <b>${esc(p.label)}</b>
+      <span class="hint">${p.aufgenommen} aufgenommen${p.pruefen ? ` · <span class="dsgrund">${p.pruefen} noch zu prüfen</span>` : ""}
+        · Klasse ${esc(p.klassen.join(", ") || "—")}${p.aus.length ? ` · selbst zusammengeführt aus ${esc(p.aus.join(", "))}` : ""}
+        ${p.key === ziel ? " · ist das Ziel" : ""}</span></label>`).join("")
+    || `<p class="hint">Noch kein Projekt mit aufgenommenen Bildern — erst Schritt 1 und 2.</p>`;
+  const gewaehlt = ZFPROJEKTE.filter(p => ZFWAHL.has(p.key) && p.key !== ziel);
+  const summe = gewaehlt.reduce((s, p) => s + p.aufgenommen, 0);
+  const klassen = [...new Set(gewaehlt.flatMap(p => p.klassen))];
+  const eigene = $("zfKlasse").value.trim();
+  $("zfVorschau").innerHTML = gewaehlt.length
+    ? `<b>${summe}</b> Bilder aus ${gewaehlt.length} Projekt(en) · Klassen im Ziel: `
+      + `<b>${esc(eigene || klassen.join(", ") || "—")}</b>`
+      + (!eigene && klassen.length > 1
+         ? ` <span class="dsgrund">— verschiedene Namen werden verschiedene Klassen. `
+           + `Ist es dasselbe Objekt, oben einen gemeinsamen Namen eintragen.</span>` : "")
+      + (gewaehlt.some(p => p.pruefen)
+         ? ` <span class="dsgrund">Noch nicht Geprüftes kommt nicht mit.</span>` : "")
+    : `<span class="dsgrund">Mindestens ein Projekt anhaken.</span>`;
+}
+$("zfZiel").onchange = zfZeigen;
+$("zfKlasse").oninput = zfZeigen;
+
+async function zfStarten() {
+  const ziel = $("zfZiel").value;
+  const quellen = [...ZFWAHL].filter(k => k !== ziel);
+  if (!quellen.length) return say("Bitte mindestens ein Projekt anhaken.", "err");
+  const res = await dsRuf({tu: "zusammenfuehren", quellen, ziel,
+                           name: $("zfName").value.trim(), klasse: $("zfKlasse").value.trim()});
+  if (!res) return;
+  say(`Zusammengeführt: ${res.bilder} Bilder aus ${res.projekte} Projekt(en) in „${res.ziel}“`
+      + (res.umbenannt ? ` (${res.umbenannt} umbenannt, die Namen gab es schon)` : "")
+      + ". Das Ziel ist jetzt das aktive Projekt.", "ok");
+  const info = await fetch("/api/info").then(r => r.json()).catch(() => null);
+  if (info) zeigeProjekte(info.projekte, info.projekt);
+  loadGallery();
+  await zfHolen();
+  wegZeigen();
 }
 
 // Verweise mit data-geh springen in einen Reiter -- in der Anleitung, in
@@ -3862,6 +3933,12 @@ async function fdHolen() {
   FDKATALOG = g.achsen || {};
   FDNAMEN = g.namen || {};
   FDWIRKUNG = g.wirkung || {};
+  if (!g.kennzeichen) {
+    $("fdKennzeichen").checked = false;
+    $("fdKennzeichen").disabled = $("fdKennzeichenOriginal").disabled = true;
+    $("fdKennzeichenHinweis").innerHTML = `<span class="dsgrund">Kein Kennzeichen-Generator: `
+      + `Vorlage (webui/kennzeichen/) oder Schrift Bahnschrift fehlt.</span>`;
+  }
   $("fdBildmodell").innerHTML = g.cloud
     ? "Bildmodell: <b>Cloud</b> (Kopfzeile › Cloud-Modelle). Jedes Bild kostet dort Geld — die Vorschau unten zählt mit."
     : g.lokal ? "Bildmodell: <b>Qwen-Image lokal</b> — braucht rund 17 GB Grafikspeicher."
@@ -3992,8 +4069,11 @@ function fdFotosZeigen() {
         <img src="${f.bild}" draggable="false" alt="">
         ${f.boden ? `<img class="fdmaske" src="${f.boden}" alt="">` : ""}
         ${f.maske ? `<img class="fdmaske" src="${f.maske}" alt="">` : ""}
+        ${f.kennzeichen ? `<svg class="edecken fdecken" viewBox="0 0 ${f.groesse[0]} ${f.groesse[1]}"
+          preserveAspectRatio="none"><polygon points="${f.kennzeichen.map(p => p.join(",")).join(" ")}"/></svg>` : ""}
         ${dsRahmen(f.box, e, "dsbox dsneu")}
       </div>
+      ${f.probe ? `<img class="fdprobe" src="${f.probe}" alt="Beispiel">` : ""}
       <figcaption>${esc(f.name)} · ${f.groesse[0]}×${f.groesse[1]}<br>
         <a href="#" onclick="fdEditor(${i});return false"><b>⤢ ausmalen</b></a>
         <a href="#" onclick="FDFOTOS.splice(${i},1);fdFotosZeigen();fdPlan();return false">entfernen</a><br>
@@ -4002,6 +4082,11 @@ function fdFotosZeigen() {
         ${punkt(f.boden, "Boden gemalt")}
         ${f.boden ? `<a href="#" onclick="FDFOTOS[${i}].boden=null;fdFotosZeigen();return false">weg</a>`
                   : "<i>(nur für Untergrund)</i>"}<br>
+        ${punkt(f.kennzeichen, "Kennzeichen markiert")}
+        ${f.kennzeichen ? `<a href="#" onclick="fdKennzeichenProbe(${i});return false">Beispiel</a>
+          ${f.probe ? `<a href="#" onclick="FDFOTOS[${i}].probe=null;fdFotosZeigen();return false">Beispiel weg</a>` : ""}
+          <a href="#" onclick="FDFOTOS[${i}].kennzeichen=null;FDFOTOS[${i}].probe=null;fdFotosZeigen();return false">weg</a>`
+          : "<i>(für ein neues Kennzeichen)</i>"}<br>
         ${punkt(f.box || f.maske, f.box ? "Box gezogen" : f.maske ? "Box aus dem Objekt"
                                          : "keine Box — der Erkenner sucht sie")}
         ${f.box ? `<a href="#" onclick="FDFOTOS[${i}].box=null;fdFotosZeigen();return false">weg</a>` : ""}
@@ -4014,11 +4099,29 @@ function fdFotosZeigen() {
 function fdEditor(i) {
   const f = FDFOTOS[i];
   editorOeffnen({bild: f.bild, breite: f.groesse[0], hoehe: f.groesse[1],
-    maske: f.maske, boden: f.boden, box: f.box, modi: ["pinsel", "boden", "radierer", "box"],
+    maske: f.maske, boden: f.boden, box: f.box, ecken: f.kennzeichen,
+    modi: ["pinsel", "boden", "kennzeichen", "radierer", "box"],
     hinweis: "🖌 Objekt: nur die Kupplung, ganz — nicht das Auto daneben. "
       + "🟫 Boden: die freie Bodenfläche, grob mit großem Pinsel (nur für Untergrund). "
-      + "Strg+Mausrad zoomt. Der Radierer nimmt beides weg.",
-    fertig: (maske, box, boden) => { f.maske = maske; f.box = box; f.boden = boden; fdFotosZeigen(); }});
+      + "▱ Kennzeichen: die vier Ecken des Schilds anklicken. "
+      + "Strg+Mausrad zoomt. Der Radierer nimmt Gemaltes weg.",
+    fertig: (maske, box, boden, ecken) => {
+      f.maske = maske; f.box = box; f.boden = boden;
+      if (JSON.stringify(ecken) !== JSON.stringify(f.kennzeichen)) f.probe = null;
+      f.kennzeichen = ecken;
+      fdFotosZeigen();
+    }});
+}
+
+// Ein Beispiel-Kennzeichen auf dem Foto selbst: sitzen die Ecken?
+async function fdKennzeichenProbe(i) {
+  const f = FDFOTOS[i];
+  const res = await fdRuf({tu: "kennzeichen_probe", bild: f.bild, groesse: f.groesse,
+                           ecken: f.kennzeichen});
+  if (!res) return;
+  f.probe = res.bild;
+  fdFotosZeigen();
+  say(`Beispiel: ${res.text} — jedes Bild bekommt ein eigenes.`, "ok");
 }
 
 function fdZiehen(ev, i) {
@@ -4067,7 +4170,9 @@ async function fdStarten() {
     base: parseInt($("fdBase").value, 10) || 1024,
     original: $("fdOriginal").checked, labeln: $("fdLabeln").checked,
     bewahren: $("fdBewahren").checked, licht: $("fdLicht").checked,
-    vorbehandeln: $("fdVorbehandeln").checked});
+    vorbehandeln: $("fdVorbehandeln").checked,
+    kennzeichen: $("fdKennzeichen").checked,
+    kennzeichen_original: $("fdKennzeichenOriginal").checked});
   if (!res) { if (!laeuftSchon) buttonState("idle"); return; }
   say(`Eingereiht: ${res.bilder} Varianten aus ${FDFOTOS.length} Foto(s) …`, "ok");
   if (!laeuftSchon) paintSeries([], Math.min(res.bilder, 60), 1);
@@ -4102,6 +4207,10 @@ function editorOeffnen(o) {
     $(m === "pinsel" ? "edPinsel" : "edRadierer").style.display = o.modi.includes(m) ? "" : "none");
   $("edBoxModus").style.display = o.modi.includes("box") ? "" : "none";
   $("edBodenModus").style.display = o.modi.includes("boden") ? "" : "none";
+  $("edKzModus").style.display = o.modi.includes("kennzeichen") ? "" : "none";
+  ED.ecken = o.ecken ? o.ecken.map(p => p.slice()) : [];
+  $("edEcken").setAttribute("viewBox", `0 0 ${o.breite} ${o.hoehe}`);
+  editorEckenZeigen();
   $("edGroesseZeile").style.display = o.modi.includes("pinsel") ? "" : "none";
   $("edLeeren").style.display = o.modi.includes("pinsel") ? "" : "none";
   $("edGroesse").max = Math.max(60, Math.round(Math.max(o.breite, o.hoehe) / 8));
@@ -4154,6 +4263,14 @@ function editorBoxZeigen() {
     width: 100 * (b[2] - b[0]) / ED.breite + "%", height: 100 * (b[3] - b[1]) / ED.hoehe + "%"});
 }
 
+// Die Ecken des Kennzeichens: ein Klick je Ecke, der fuenfte faengt neu an.
+function editorEckenZeigen() {
+  const e = (ED && ED.ecken) || [];
+  const r = ED ? Math.max(ED.breite, ED.hoehe) / 250 : 3;
+  $("edEcken").innerHTML = (e.length > 1 ? `<polygon points="${e.map(p => p.join(",")).join(" ")}"/>` : "")
+    + e.map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="${r}"/>`).join("");
+}
+
 function editorPunkt(ev) {
   const r = $("edInnen").getBoundingClientRect();
   return [Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)) * ED.breite,
@@ -4184,6 +4301,12 @@ $("edInnen").addEventListener("pointerdown", ev => {
   $("edInnen").setPointerCapture(ev.pointerId);
   const start = editorPunkt(ev);
   let letzter = start;
+  if (ED.modus === "kennzeichen") {
+    if (ED.ecken.length >= 4) ED.ecken = [];
+    ED.ecken.push(start.map(Math.round));
+    editorEckenZeigen();
+    return;
+  }
   if (ED.modus !== "box") editorStrich(start, start);
   const weiter = m => {
     const p = editorPunkt(m);
@@ -4211,7 +4334,7 @@ $("edInnen").addEventListener("pointerdown", ev => {
 // Der Pinselkreis folgt der Maus -- man sieht vorher, was er trifft.
 $("edInnen").addEventListener("pointermove", ev => {
   const z = $("edZeiger");
-  if (!ED || ED.modus === "box") { z.style.display = "none"; return; }
+  if (!ED || ED.modus === "box" || ED.modus === "kennzeichen") { z.style.display = "none"; return; }
   const r = $("edInnen").getBoundingClientRect(), d = ED.pinsel * ED.zoom;
   Object.assign(z.style, {display: "block", width: d + "px", height: d + "px",
     left: ev.clientX - r.left - d / 2 + "px", top: ev.clientY - r.top - d / 2 + "px"});
@@ -4228,6 +4351,7 @@ $("edPinsel").onclick = () => editorModus("pinsel");
 $("edRadierer").onclick = () => editorModus("radierer");
 $("edBoxModus").onclick = () => editorModus("box");
 $("edBodenModus").onclick = () => editorModus("boden");
+$("edKzModus").onclick = () => editorModus("kennzeichen");
 $("edGroesse").oninput = editorGroesse;
 $("edGroesser").onclick = () => editorZoom(ED.zoom * 1.25);
 $("edKleiner").onclick = () => editorZoom(ED.zoom * 0.8);
@@ -4239,6 +4363,8 @@ $("edLeeren").onclick = () => {
     c.getContext("2d").clearRect(0, 0, c.width, c.height);
   });
   ED.gemalt = false;
+  ED.ecken = [];
+  editorEckenZeigen();
 };
 $("edBoxWeg").onclick = () => { ED.box = null; editorBoxZeigen(); };
 $("edAbbrechen").onclick = () => { $("edEditor").style.display = "none"; ED = null; };
@@ -4264,9 +4390,10 @@ $("edFertig").onclick = () => {
   const boden = ED.modi.includes("boden") && !editorMaskeLeer("edBoden")
     ? $("edBoden").toDataURL("image/png") : null;
   const fertig = ED.fertig, box = ED.box;
+  const ecken = ED.ecken && ED.ecken.length === 4 ? ED.ecken : null;
   $("edEditor").style.display = "none";
   ED = null;
-  fertig(maske, box, boden);
+  fertig(maske, box, boden, ecken);
 };
 
 // ---------- Cloud-Modelle ----------
@@ -4391,6 +4518,8 @@ async function projektTun(rumpf) {
   const info = await fetch("/api/info").then(r => r.json()).catch(() => null);
   if (info) { zeigeProjekte(info.projekte, info.projekt); zeigeBausteine(info.bausteine); }
   loadGallery();
+  wegZeigen();
+  if (mode === "zusammen") { ZFWAHL.clear(); zfHolen(); }
   return res.json();
 }
 

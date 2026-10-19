@@ -620,6 +620,14 @@
 .edinnen { position: relative; margin: 4px; line-height: 0; cursor: crosshair; user-select: none; touch-action: none; }
 .edinnen img, .edinnen canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
 .edinnen canvas { opacity: .45; }
+.edinnen svg.edecken { position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+  pointer-events: none; overflow: visible; }
+.edecken polygon { fill: rgba(80, 160, 255, .18); stroke: #4ea1ff; stroke-width: 2;
+  vector-effect: non-scaling-stroke; }
+.edecken circle { fill: #4ea1ff; stroke: #fff; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.fdunter { margin-left: 24px; margin-top: 4px; }
+.dsflaeche svg.fdecken { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
+.fdprobe { width: 100%; display: block; border-top: 1px solid var(--line); }
 .edzeiger { position: absolute; border: 1px solid #fff; outline: 1px solid #000; border-radius: 50%;
   pointer-events: none; display: none; }
 /* Die gemalte Maske ueber dem Vorschaubild einer Fotokachel. */
@@ -631,10 +639,18 @@
 .weg { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px 8px; margin: -4px 0 12px; }
 .wegkopf { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; margin: 0 0 6px 2px; }
 .tabs.tabsweg { margin-bottom: 0; }
+.tabs.tabsweg button { white-space: normal; text-overflow: clip; line-height: 1.25; }
+.wegkopf { display: flex; align-items: center; justify-content: space-between; }
+.weganleitung { padding: 2px 9px; border: 1px solid var(--line); background: transparent;
+  color: var(--link); border-radius: 6px; cursor: pointer; font: inherit; font-size: 11.5px;
+  text-transform: none; letter-spacing: 0; }
+.weganleitung.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.zfprojekt { align-items: baseline; flex-wrap: wrap; }
+.zfprojekt.zfaus { opacity: .5; }
 #wegStand { margin: 8px 2px 0; }
 
 /* Fotodaten und Anleitung: die Stufen in ihrer Reihenfolge. */
-#fotodatenBox h3.stufe, #anleitungBox h3.stufe {
+#fotodatenBox h3.stufe, #anleitungBox h3.stufe, #zusammenBox h3.stufe {
   font-size: 12px; color: var(--text); text-transform: uppercase;
   letter-spacing: .06em; margin: 18px 0 2px; padding-top: 10px;
   border-top: 1px solid var(--line);

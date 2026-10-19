@@ -139,12 +139,13 @@
          Reihenfolge; die Zeile darunter sagt, wo man steht und was als
          Naechstes kommt. -->
     <div class="weg">
-      <div class="wegkopf">Eigener Detektor — der Reihe nach</div>
+      <div class="wegkopf">Eigener Detektor — der Reihe nach
+        <button id="tab-anleitung" class="weganleitung">? Anleitung</button></div>
       <div class="tabs tabsweg">
-        <button id="tab-anleitung">? Anleitung</button>
         <button id="tab-fotodaten">1 · Fotodaten</button>
         <button id="tab-datensatz">2 · Prüfen</button>
-        <button id="tab-training">3 · Trainieren</button>
+        <button id="tab-zusammen">3 · Zusammen&shy;führen</button>
+        <button id="tab-training">4 · Trainieren</button>
       </div>
       <p class="hint" id="wegStand" style="display:none"></p>
     </div>
@@ -551,7 +552,7 @@
     <fieldset id="anleitungBox" style="display:none">
       <legend>Anleitung: Trainingsdaten erzeugen und Detektor trainieren</legend>
       <p class="hint">Ziel: ein Detektor, der dein Objekt — etwa eine
-        Anhängerkupplung — in echten Fotos findet. Der Weg hat vier Schritte,
+        Anhängerkupplung — in echten Fotos findet. Der Weg hat fünf Schritte,
         jeder in seinem Reiter. Alles landet im <b>Projekt</b> oben in der
         Kopfzeile; für einen neuen Detektor dort <b>+ neu</b>.</p>
 
@@ -569,6 +570,9 @@
               ergibt sich daraus.</li>
             <li><b>🟫 Boden</b> — die freie Bodenfläche, grob mit großem
               Pinsel. Nur nötig für die Achse <i>Untergrund</i>.</li>
+            <li><b>▱ Kennzeichen</b> — die vier Ecken des Schilds anklicken.
+              Dann bekommt jedes Bild ein zufälliges deutsches Kennzeichen,
+              auch schräg. <i>Beispiel</i> unter dem Foto zeigt, ob es sitzt.</li>
           </ul></li>
         <li><b>Was sich ändern darf:</b> Farbe, Untergrund, Kamera, Licht
           anhaken und die Werte wählen.</li>
@@ -593,7 +597,22 @@
       <p class="hint">Nur aufgenommene Bilder gehen ins Training. Für einen
         ersten Versuch reichen 50–100, gut wird es ab einigen hundert.</p>
 
-      <h3 class="stufe">3 · Trainieren
+      <h3 class="stufe">3 · Zusammenführen (wenn es mehrere Projekte gibt)
+        <a href="#" data-geh="zusammen">öffnen →</a></h3>
+      <ol class="anleitung">
+        <li>Für jede Ansicht ein eigenes Projekt — etwa die Kupplung
+          <i>von hinten</i> und <i>von der Seite</i>: andere Fotos, andere
+          Maske, eigener Plan. Jedes für sich Schritt 1 und 2.</li>
+        <li>Hier die Projekte anhaken und ein Ziel wählen, am besten ein
+          neues („Kupplung alle“). Übernommen werden nur aufgenommene
+          Bilder; die Quellen bleiben, wie sie sind.</li>
+        <li>Später in einer Quelle nachgeprüft? Einfach noch einmal
+          zusammenführen — es wird abgeglichen, nicht verdoppelt.</li>
+        <li>Haben die Projekte ihr Objekt verschieden genannt, unter
+          <i>Klasse im Ziel</i> einen gemeinsamen Namen eintragen.</li>
+      </ol>
+
+      <h3 class="stufe">4 · Trainieren
         <a href="#" data-geh="training">öffnen →</a></h3>
       <ol class="anleitung">
         <li>Modell <b>dfine-nano</b> (frei weitergebbar) oder <b>yolo26n</b>.</li>
@@ -603,10 +622,10 @@
           Epoche und mAP50; 1,0 hieße alles gefunden.</li>
       </ol>
 
-      <h3 class="stufe">4 · Ausprobieren
+      <h3 class="stufe">5 · Ausprobieren
         <a href="#" data-geh="training">öffnen →</a></h3>
       <ol class="anleitung">
-        <li>Im Reiter Trainieren unten bei <b>Ausprobieren</b> den Lauf
+        <li>Im Reiter 4 · Trainieren unten bei <b>Ausprobieren</b> den Lauf
           wählen, Mindestsicherheit 0,25.</li>
         <li>Ein <b>echtes</b> Foto hochladen, das nicht im Training war.
           Findet er wenig: mehr echte Fotos, mehr Epochen, Bildgröße 960.</li>
@@ -622,10 +641,42 @@
         <li><b>Lokal</b> (Qwen-Image, große Grafikkarte): mehr Vielfalt, das
           Einsetzen gelingt besser.</li>
         <li>Training auf einem anderen Rechner: den Ordner
-          <code>projekte\&lt;Projekt&gt;</code> kopieren, dort Schritt 3.</li>
+          <code>projekte\&lt;Projekt&gt;</code> kopieren, dort Schritt 4.</li>
         <li>Die ausführliche Anleitung steht in <code>ANLEITUNG.md</code>,
           Abschnitt 7.</li>
       </ul>
+    </fieldset>
+
+    <fieldset id="zusammenBox" style="display:none">
+      <legend>3 · Datensätze zusammenführen</legend>
+      <p class="hint">Mehrere Projekte zu einem Trainingssatz — etwa die
+        Kupplung von hinten und von der Seite. Übernommen werden nur
+        <b>aufgenommene</b> Bilder; die Quellprojekte bleiben, wie sie sind.
+        Noch einmal zusammenführen gleicht ab, statt zu verdoppeln — geprüft
+        und korrigiert wird deshalb in den Quellen.</p>
+
+      <h3 class="stufe">1 · Welche Projekte</h3>
+      <div id="zfListe"></div>
+
+      <h3 class="stufe">2 · Wohin</h3>
+      <div class="axis">
+        <div>
+          <label for="zfZiel">Zielprojekt</label>
+          <select id="zfZiel"></select>
+        </div>
+        <div id="zfNameZeile">
+          <label for="zfName">Name des neuen Projekts</label>
+          <input id="zfName" value="Kupplung alle">
+        </div>
+      </div>
+      <label for="zfKlasse">Klasse im Ziel (leer = jede behält ihren Namen)</label>
+      <input id="zfKlasse" placeholder="z. B. anhaengerkupplung">
+      <p class="hint" id="zfVorschau"></p>
+
+      <h3 class="stufe">3 · Zusammenführen</h3>
+      <p class="hint">Mit dem großen Knopf unten. Danach ist das Ziel das
+        aktive Projekt — weiter mit
+        <a href="#" data-geh="training"><b>4 · Trainieren →</b></a></p>
     </fieldset>
 
     <fieldset id="fotodatenBox" style="display:none">
@@ -664,11 +715,21 @@
       <p class="hint">Je Foto <b>⤢ ausmalen</b>: mit <b>🖌 Objekt</b> nur die
         Kupplung bemalen — nicht das Auto daneben, das soll sich ja ändern.
         Mit <b>🟫 Boden</b> die freie Bodenfläche, wenn sich der Untergrund
-        ändern soll. Die Box ergibt sich aus dem Objekt; ziehen musst du sie
+        ändern soll. Mit <b>▱ Kennzeichen</b> die vier Ecken des Schilds,
+        wenn es ein neues bekommen soll. Die Box ergibt sich aus dem Objekt; ziehen musst du sie
         nur, wenn du nicht malst.</p>
       <div id="fdFotos" class="dsgitter"></div>
 
       <h3 class="stufe">3 · Was sich ändern darf</h3>
+      <label class="check"><input type="checkbox" id="fdKennzeichen" checked>
+        <b>Kennzeichen</b>&nbsp;in jedem Bild zufällig neu (wo markiert)</label>
+      <label class="check fdunter"><input type="checkbox" id="fdKennzeichenOriginal" checked>
+        auch im Original — das echte kommt so nicht in den Datensatz</label>
+      <p class="hint" id="fdKennzeichenHinweis">Deutsche Kennzeichen nach den
+        Regeln (Ortskennung, ein bis zwei Buchstaben, bis vier Ziffern,
+        manchmal E oder H), mit Plakette und Siegel, perspektivisch und im
+        Licht des alten Schilds eingesetzt. Dazu im Editor <b>▱ Kennzeichen</b>
+        die vier Ecken anklicken.</p>
       <label for="fdZiel">Was umgefärbt wird (für die Farbe, englisch)</label>
       <input id="fdZiel" value="the car body">
       <p class="hint">Achse anhaken und ihre Werte wählen. Nicht angehakte
@@ -733,6 +794,7 @@
         <span class="edgruppe">
           <button type="button" id="edPinsel" data-modus="pinsel" title="Das Objekt malen, das unverändert bleibt">🖌 Objekt</button>
           <button type="button" id="edBodenModus" data-modus="boden" title="Die Bodenfläche malen, die einen neuen Untergrund bekommt">🟫 Boden</button>
+          <button type="button" id="edKzModus" data-modus="kennzeichen" title="Die vier Ecken des Kennzeichens anklicken">▱ Kennzeichen</button>
           <button type="button" id="edRadierer" data-modus="radierer" title="Gemaltes wegnehmen">⌫ Radierer</button>
           <button type="button" id="edBoxModus" data-modus="box" title="Box um das Objekt ziehen">▭ Box ziehen</button>
         </span>
@@ -761,6 +823,7 @@
           <img id="edBild" alt="" draggable="false">
           <canvas id="edMaske"></canvas>
           <canvas id="edBoden"></canvas>
+          <svg id="edEcken" class="edecken" preserveAspectRatio="none"></svg>
           <div id="edBox" class="dsbox dsneu" style="display:none"></div>
           <div id="edZeiger" class="edzeiger"></div>
         </div>

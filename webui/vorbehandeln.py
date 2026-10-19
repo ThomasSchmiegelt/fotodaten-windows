@@ -103,6 +103,26 @@ def _koeffizienten(groesse: tuple, punkte: list) -> tuple:
     return tuple(np.linalg.solve(np.array(a, float), np.array(r, float)))
 
 
+def kamera_ecken(groesse: tuple, position: str | None, mitte: tuple | None,
+                 ecken: list | None) -> list | None:
+    """Wohin Punkte des Fotos mit der Kameraposition wandern -- etwa die vier
+    Ecken des Kennzeichens. Die Abbildung von `kamera` geht vom neuen Bild
+    ins Foto; hier braucht es die Umkehrung."""
+    if not ecken or position not in KAMERA:
+        return ecken
+    punkte = _kamera_punkte(groesse, KAMERA[position], mitte)
+    if not punkte:
+        return ecken
+    k = _koeffizienten(groesse, punkte)
+    umgekehrt = np.linalg.inv(np.array([[k[0], k[1], k[2]], [k[3], k[4], k[5]],
+                                        [k[6], k[7], 1.0]]))
+    raus = []
+    for x, y in ecken:
+        u, v, w = umgekehrt @ np.array([x, y, 1.0])
+        raus.append((u / w, v / w))
+    return raus
+
+
 def kamera(bilder: list, position: str | None, mitte: tuple | None = None) -> list:
     """Dieselbe Kameraposition fuer Foto und Masken (None bleibt None).
 
@@ -345,10 +365,12 @@ DUNKEL = {"blau", "neon", "gegenlicht"}
 # --- Alles zusammen -----------------------------------------------------
 
 def anwenden(bild: Image.Image, belegung: dict, maske: Image.Image | None = None,
-             bodenflaeche: Image.Image | None = None, untergrund: dict | None = None):
+             bodenflaeche: Image.Image | None = None, untergrund: dict | None = None,
+             ecken: list | None = None):
     """Foto und Maske fuer eine Belegung (Achse -> Schluessel).
 
-    Zurueck (Vorlage, Maske): die Maske hat die Kameraposition mitgemacht.
+    Zurueck (Vorlage, Maske, Ecken): Maske und die Ecken des Kennzeichens
+    haben die Kameraposition mitgemacht.
     `untergrund` ist Schluessel -> Text der Untergrundsorten; ohne gemalte
     Bodenflaeche bleibt der Boden, wie er ist.
     """
@@ -356,14 +378,16 @@ def anwenden(bild: Image.Image, belegung: dict, maske: Image.Image | None = None
     if maske is not None and maske.getbbox():
         x1, y1, x2, y2 = maske.getbbox()
         mitte = ((x1 + x2) / 2, (y1 + y2) / 2)
+    groesse = bild.size
     bild, maske, bodenflaeche = kamera([bild.convert("RGB"), maske, bodenflaeche],
                                        belegung.get("angle"), mitte)
+    ecken = kamera_ecken(groesse, belegung.get("angle"), mitte, ecken)
     bild = farbe(bild, belegung.get("paint"))
     sorte = belegung.get("scene")
     if bodenflaeche is not None and untergrund and sorte in untergrund:
         bild = boden(bild, bodenflaeche, boden_bild(sorte, untergrund[sorte]))
     bild = licht(bild, belegung.get("light"))
-    return bild, maske
+    return bild, maske, ecken
 
 
 def wirkt(achse: str, wert: str, mit_boden: bool) -> bool:

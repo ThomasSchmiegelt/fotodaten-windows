@@ -7,6 +7,7 @@ Dann:   http://127.0.0.1:7860
 import base64
 import hashlib
 import io
+import random
 import json
 import mimetypes
 import os
@@ -43,6 +44,7 @@ import cloud  # noqa: E402
 import datensatz  # noqa: E402
 import detektor  # noqa: E402
 import fotodaten  # noqa: E402
+import kennzeichen  # noqa: E402
 import sechsseiten  # noqa: E402
 import retusche  # noqa: E402
 import vervielfaeltigen  # noqa: E402
@@ -1111,7 +1113,29 @@ class Handler(BaseHTTPRequestHandler):
                                         "arten": list(fotodaten.ARTEN),
                                         "max_alle": fotodaten.MAX_ALLE,
                                         "cloud": bool(cloud.aktiv("bild")),
+                                        "kennzeichen": kennzeichen.verfuegbar(),
                                         "lokal": LOKAL})
+            if was == "kennzeichen_probe":
+                # Ein Beispiel auf dem Foto selbst: sitzen die Ecken?
+                if not kennzeichen.verfuegbar():
+                    return self._json(400, {"error": "Keine Kennzeichen-Vorlage oder "
+                                            "keine Schrift (Bahnschrift) gefunden"})
+                try:
+                    bild = fotodaten.vorbereiten(decode(params["bild"]))
+                    ecken = fotodaten.ecken_umrechnen(params.get("ecken"),
+                                                      tuple(params.get("groesse") or bild.size),
+                                                      bild.size)
+                    if not ecken:
+                        return self._json(400, {"error": "Bitte vier Ecken markieren"})
+                    teile = kennzeichen.zufall(random.Random())
+                    fertig = kennzeichen.einsetzen(bild, ecken, kennzeichen.zeichnen(teile))
+                except Exception as exc:
+                    return self._json(400, {"error": f"Das ging nicht: {exc}"})
+                puffer = io.BytesIO()
+                fertig.save(puffer, format="JPEG", quality=90)
+                return self._json(200, {"bild": "data:image/jpeg;base64,"
+                                        + base64.b64encode(puffer.getvalue()).decode(),
+                                        "text": kennzeichen.text(teile)})
             try:
                 belegung = fotodaten.plan(params.get("achsen") or {},
                                           params.get("art") or "beides",
@@ -1155,6 +1179,30 @@ class Handler(BaseHTTPRequestHandler):
                                             "Box -- erst Basisbilder erzeugen und prüfen"})
                 nummer = einreihen("vervielfaeltigen", params)["nummer"]
                 return self._json(202, {"ok": True, "nummer": nummer})
+            if params.get("tu") == "projekte":
+                return self._json(200, {"projekte": datensatz.projekte_mit_daten(),
+                                        "aktiv": projekt})
+            if params.get("tu") == "zusammenfuehren":
+                # Ein laufender Auftrag schreibt womoeglich gerade in einen
+                # der Datensaetze.
+                if engine.lock.locked():
+                    return self._json(409, {"error": "Erst abwarten: es laeuft ein Auftrag"})
+                quellen = [str(q) for q in params.get("quellen") or []
+                           if projekte.SCHLUESSEL.fullmatch(str(q))]
+                ziel = str(params.get("ziel") or "")
+                if ziel == "neu":
+                    ziel = projekte.anlegen(str(params.get("name") or "zusammen"))["key"]
+                elif not projekte.SCHLUESSEL.fullmatch(ziel) or not projekte.waehlen(ziel):
+                    return self._json(404, {"error": "Zielprojekt nicht gefunden"})
+                try:
+                    zahl = datensatz.zusammenfuehren(
+                        quellen, ziel, str(params.get("klasse") or "").strip() or None)
+                except ValueError as exc:
+                    return self._json(400, {"error": str(exc)})
+                # Das Ziel ist danach das aktive Projekt: der naechste
+                # Schritt trainiert es.
+                projekte.waehlen(ziel)
+                return self._json(200, {"ok": True, "ziel": ziel, **zahl})
             if params.get("tu") == "setzen":
                 e = datensatz.setzen(projekt, str(params.get("datei") or ""),
                                      str(params.get("status") or ""),

@@ -90,10 +90,11 @@ Darunter, eigens umrahmt, **Eigener Detektor — der Reihe nach**:
 
 | Reiter | Wofür |
 |---|---|
-| ? Anleitung | die vier Schritte zum eigenen Detektor, mit Sprung in den jeweiligen Reiter |
+| ? Anleitung | die Schritte zum eigenen Detektor, mit Sprung in den jeweiligen Reiter (Knopf rechts in der Überschrift) |
 | 1 · Fotodaten | aus echten Fotos Varianten nach Plan, gleich mit Box im Datensatz |
 | 2 · Prüfen | Bounding Boxes prüfen, aufnehmen, korrigieren (der Datensatz) |
-| 3 · Trainieren | einen Detektor (D-FINE oder YOLO26) trainieren und ausprobieren |
+| 3 · Zusammenführen | die aufgenommenen Bilder mehrerer Projekte zu einem Trainingssatz — etwa Kupplung von hinten und von der Seite |
+| 4 · Trainieren | einen Detektor (D-FINE oder YOLO26) trainieren und ausprobieren |
 
 Unter diesen vier Reitern steht, wo das Projekt gerade steht (Fotos,
 aufgenommen, zu prüfen, Trainingsläufe), und **Als Nächstes** mit einem
@@ -439,9 +440,43 @@ Die Vielfalt der Blickwinkel kommt so vom großen Modell, die Menge vom
 eigenen Rechner. `QWEN_BOX_GERAET=cpu` bzw. `cuda` legt fest, wo Qwen3-VL
 rechnet, unabhängig von der Kartengröße.
 
+### Schritt 3¾ — Projekte zusammenführen (optional)
+
+Ein Detektor soll die Kupplung von hinten *und* von der Seite finden. Die
+Seitenansicht braucht aber andere Fotos, eine andere Maske und einen
+anderen Plan — also erzeugt und prüft man jede Ansicht in ihrem eigenen
+Projekt (z. B. „Kupplung hinten“ und „Kupplung seitlich“) und führt sie vor
+dem Training zusammen. Reiter **3 · Zusammenführen**:
+
+1. **Welche Projekte:** anhaken. Neben jedem steht, wie viele Bilder
+   aufgenommen und wie viele noch zu prüfen sind, und welche Klasse es hat.
+2. **Wohin:** am besten ein **neues Projekt** („Kupplung alle“), sonst ein
+   vorhandenes.
+3. **Klasse im Ziel:** leer lassen, wenn alle dieselbe Klasse haben. Heißt
+   das Objekt in den Projekten verschieden (`anhaengerkupplung`,
+   `kupplung_seite`), hier den gemeinsamen Namen eintragen — sonst werden es
+   zwei Klassen.
+4. Großer Knopf **Zusammenführen**. Danach ist das Ziel das aktive Projekt,
+   weiter mit Schritt 4.
+
+Was dabei passiert:
+
+- Übernommen werden nur **aufgenommene** Bilder. Die Quellprojekte bleiben
+  unberührt.
+- Die Bilder werden als Hardlink abgelegt: keine Wartezeit, kein
+  zusätzlicher Platz. Wo das nicht geht (anderes Laufwerk), wird kopiert.
+- **Noch einmal zusammenführen gleicht ab** statt zu verdoppeln: was aus
+  einer Quelle kam, wird durch ihren jetzigen Stand ersetzt. Geprüft und
+  korrigiert wird deshalb in den Quellprojekten, nicht im Ziel.
+- Die Dateinamen bleiben; so bleiben Bilder aus demselben Foto auch im
+  Ziel zusammen in Training oder Validierung. Nur ein Name, den es im Ziel
+  schon gibt, bekommt das Quellprojekt vorangestellt.
+- Gemessen: 693 + 5 Bilder aus zwei Projekten, zweimal hintereinander
+  zusammengeführt — beide Male 698 im Ziel, jedes mit Label.
+
 ### Schritt 4 — Detektor trainieren
 
-Reiter **3 · Trainieren**. Die Einstellungen stehen als Tabelle:
+Reiter **4 · Trainieren**. Die Einstellungen stehen als Tabelle:
 
 | Feld | Empfehlung |
 |---|---|
@@ -493,7 +528,7 @@ mit RTX 1000 Ada (6 GB), eingerichtet mit `einrichten.bat training`:
 1. Auf dem ersten Rechner den ganzen Projektordner kopieren:
    `projekte\<Projekt>\` (darin `projekt.json` und `datensatz\`).
 2. Auf dem Trainingsrechner nach `projekte\` legen und `start.bat` starten.
-3. Kopfzeile › Projekt wählen, Reiter **3 · Trainieren**, `yolo26n` oder
+3. Kopfzeile › Projekt wählen, Reiter **4 · Trainieren**, `yolo26n` oder
    `yolo26s`, Bildgröße 640.
 
 Gemessen bei 640 px: yolo26n mit Stapel 16 und yolo26s mit Stapel 8 belegen
@@ -636,6 +671,35 @@ Saum in der alten Farbe hinterlässt. Gemessen am blauen BMW:
 | 0,3 | 0,71 | Auto und Kupplung bleiben an ihrem Platz |
 | 0,4 (mit Maske) | 0,39–0,62 | rot, schwarz, gelb: echte Kupplung eingesetzt; silber: Kupplung vom Modell ersetzt, nicht eingesetzt |
 | 0,7 | 0,25 | anderes Auto, nichts eingesetzt |
+
+**Kennzeichen.** Das Bildmodell verwürfelt jede Schrift — aus „M DI 380E“
+wird Buchstabensalat, und der Detektor lernte, dass über der Kupplung immer
+Unsinn steht. Deshalb bekommt jedes Bild ein zufälliges deutsches
+Kennzeichen:
+
+1. Im Editor **▱ Kennzeichen** wählen und die **vier Ecken** des Schilds
+   anklicken (Reihenfolge egal; ein fünfter Klick fängt neu an).
+2. Unter dem Foto **Beispiel** — zeigt sofort ein neues Schild an der
+   Stelle, ob die Ecken sitzen.
+3. In Schritt 3 ist **Kennzeichen in jedem Bild zufällig neu** angehakt,
+   darunter **auch im Original**: dann kommt das echte Kennzeichen gar
+   nicht erst in den Datensatz.
+
+Erzeugt wird nach den Regeln: bayerische Ortskennung (das Siegel der
+Vorlage ist das bayerische), ein bis zwei Buchstaben, meist drei bis vier
+Ziffern, höchstens acht Zeichen, manchmal E oder H, keine verbotenen
+Kombinationen; die HU-Plakette in einer der sechs Jahresfarben. Die Schrift
+ist Bahnschrift (in Windows, nach DIN 1451) schmal gesetzt — die echte
+FE-Schrift ist ähnlich, aber nicht frei. Eingesetzt wird perspektivisch in
+die vier Ecken, im Licht des alten Schilds (auch ein Schatten quer darüber
+bleibt) und mit seinem Farbstich. In einer Variante wird die Stelle gesucht
+wie bei der Kupplung, die Kamera-Verzerrung rechnet mit; ist sie nicht
+sicher, bleibt das Schild der Variante. Welches Kennzeichen ein Bild trägt,
+steht in `attribute.csv` (Spalte `kennzeichen`).
+
+Die Vorlage — ein echtes Schild ohne Schrift, dazu Plakette und Siegel —
+liegt in `webui\kennzeichen\`, gebaut aus einem Foto mit gut lesbarem
+Kennzeichen (`kennzeichen.vorlage_bauen`).
 
 **Kamera, Licht und Untergrund in der Cloud.** Bei Stärke 0,4 malt das
 Modell das Foto nur nach. Gemessen am blauen BMW: alle zehn Kamerapositionen

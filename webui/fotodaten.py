@@ -327,6 +327,45 @@ def verkleinert(bild: Image.Image, kante: int) -> Image.Image:
     return bild.resize((round(bild.size[0] * f), round(bild.size[1] * f)), Image.LANCZOS)
 
 
+def ecken_umrechnen(ecken, von: tuple, nach: tuple) -> list | None:
+    """Die vier Ecken des Kennzeichens aus der Anzeige ins vorbereitete Foto."""
+    if not ecken or len(ecken) != 4:
+        return None
+    fx, fy = nach[0] / von[0], nach[1] / von[1]
+    try:
+        return [(float(x) * fx, float(y) * fy) for x, y in ecken]
+    except (TypeError, ValueError):
+        return None
+
+
+def kennzeichen_neu(quelle: Image.Image, ecken: list, variante: Image.Image,
+                    seed) -> tuple[Image.Image, str | None]:
+    """Ein zufaelliges Kennzeichen dort einsetzen, wo das Schild in der
+    Variante jetzt sitzt.
+
+    Gesucht wird wie bei der Kupplung (`ausrichten`), mit der Flaeche des
+    Schilds als Maske -- seine Kanten sind kraeftig und finden sich gut.
+    Ist die Lage nicht sicher, bleibt das Bild, wie es ist: ein Schild
+    neben dem Schild waere schlimmer als Buchstabensalat.
+    """
+    import kennzeichen
+    if not ecken or not kennzeichen.verfuegbar():
+        return variante, None
+    variante = variante.convert("RGB")
+    fx, fy = variante.size[0] / quelle.size[0], variante.size[1] / quelle.size[1]
+    ecken = [(x * fx, y * fy) for x, y in ecken]
+    if quelle.size != variante.size:
+        quelle = quelle.resize(variante.size, Image.LANCZOS)
+    dx, dy, guete, eindeutig = ausrichten(quelle, kennzeichen.maske(variante.size, ecken),
+                                          variante)
+    if guete < LAGE_SICHER or not eindeutig:
+        return variante, None
+    teile = kennzeichen.zufall(random.Random(seed))
+    neu = kennzeichen.einsetzen(variante, [(x + dx, y + dy) for x, y in ecken],
+                                kennzeichen.zeichnen(teile))
+    return neu, kennzeichen.text(teile)
+
+
 def box_umrechnen(box, von: tuple, nach: tuple) -> list | None:
     """Eine Box aus den Pixeln der Anzeige in die des vorbereiteten Fotos."""
     if not box or len(box) != 4:

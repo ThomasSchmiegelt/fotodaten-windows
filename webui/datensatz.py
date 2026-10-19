@@ -186,7 +186,7 @@ def _formate(projekt: str, daten: list[dict]) -> None:
     # erzeugt, aus welchem Foto. Damit laesst sich der Satz ausbalancieren
     # oder ein Klassifikator auf Farbe, Untergrund, Licht trainieren.
     spalten = ["datei", "status", "klasse", "echt", "foto", "quelle",
-               "x1", "y1", "x2", "y2", "breite", "hoehe", *ACHSEN]
+               "x1", "y1", "x2", "y2", "breite", "hoehe", *ACHSEN, "kennzeichen"]
     with open(os.path.join(pfad, "attribute.csv"), "w", newline="",
               encoding="utf-8") as fh:
         schreiber = csv.writer(fh)
@@ -198,7 +198,8 @@ def _formate(projekt: str, daten: list[dict]) -> None:
                                 1 if e.get("echt") else 0, e.get("foto") or "",
                                 e.get("quelle") or "", *box,
                                 e.get("breite"), e.get("hoehe"),
-                                *(achsen.get(k) or "" for k in ACHSEN)])
+                                *(achsen.get(k) or "" for k in ACHSEN),
+                                e.get("kennzeichen") or ""])
 
 
 def bildpfad(projekt: str, status: str, datei: str) -> str | None:
@@ -264,6 +265,102 @@ def hinzufuegen(projekt: str, neue: list[dict]) -> None:
         namen = {n["datei"] for n in neue}
         daten = [e for e in eintraege(projekt) if e["datei"] not in namen] + neue
         _speichern(projekt, daten)
+
+
+# --- Zusammenfuehren -------------------------------------------------------
+#
+# Die Kupplung von hinten und die Kupplung von der Seite sind dasselbe Objekt
+# -- ein Detektor soll beide kennen. Erzeugt und geprueft wird je Ansicht in
+# einem eigenen Projekt (andere Fotos, andere Maske, anderer Plan), trainiert
+# wird auf allen zusammen. Dazwischen legt `zusammenfuehren` die
+# aufgenommenen Bilder mehrerer Projekte in ein Zielprojekt.
+#
+# Die Quellen bleiben unberuehrt. Jeder uebernommene Eintrag merkt sich sein
+# Projekt (`aus_projekt`); ein zweites Zusammenfuehren ersetzt genau diese
+# Eintraege. So ist es nach weiterem Pruefen in einer Quelle ein Abgleich,
+# kein Verdoppeln -- geaendert wird deshalb in der Quelle, nicht im Ziel.
+#
+# Dateinamen bleiben, wie sie sind: `detektor._gruppe` liest aus den ersten
+# beiden Teilen, welche Bilder aus demselben Foto stammen, und haelt sie in
+# train oder val zusammen. Nur ein Name, den es im Ziel schon gibt, bekommt
+# das Quellprojekt vorangestellt -- ohne Unterstrich, damit die Gruppe
+# bleibt.
+
+def _verknuepfen(quelle: str, ziel: str) -> None:
+    """Hardlink, sonst Kopie. Ein Link kostet keinen Platz und keine Zeit --
+    bei tausend Bildern zu je 1,5 MB macht das den Unterschied."""
+    if os.path.exists(ziel):
+        os.remove(ziel)
+    try:
+        os.link(quelle, ziel)
+    except OSError:
+        shutil.copy2(quelle, ziel)
+
+
+def zusammenfuehren(quellen: list[str], ziel: str, klasse: str | None = None) -> dict:
+    """Die aufgenommenen Bilder der Quellprojekte ins Zielprojekt legen.
+
+    `klasse` gibt allen uebernommenen Bildern denselben Klassennamen --
+    falls die Projekte ihr Objekt verschieden genannt haben. Leer heisst:
+    jede behaelt ihren.
+    """
+    if klasse and not KLASSE.fullmatch(klasse):
+        raise ValueError("Die Klasse bitte klein, ohne Leerzeichen, z. B. anhaengerkupplung")
+    quellen = [q for q in dict.fromkeys(quellen or []) if q != ziel]
+    if not quellen:
+        raise ValueError("Bitte mindestens ein anderes Projekt als Quelle wählen")
+    zaehler = {"bilder": 0, "projekte": 0, "umbenannt": 0}
+    with _sperre:
+        daten = eintraege(ziel)
+        for e in daten:
+            if e.get("aus_projekt") in quellen:
+                alt = os.path.join(wurzel(ziel), ORDNER[e["status"]], e["datei"])
+                if os.path.isfile(alt):
+                    os.remove(alt)
+        daten = [e for e in daten if e.get("aus_projekt") not in quellen]
+        vergeben = {e["datei"] for e in daten}
+        for q in quellen:
+            nehmen = [e for e in eintraege(q) if e.get("status") == "ok" and e.get("box")]
+            if not nehmen:
+                continue
+            zaehler["projekte"] += 1
+            neu_name = {}
+            for e in nehmen:
+                name = e["datei"]
+                if name in vergeben:
+                    name = f"{q.replace('_', '-')}-{name}"
+                    zaehler["umbenannt"] += 1
+                neu_name[e["datei"]] = name
+                vergeben.add(name)
+            for e in nehmen:
+                n = dict(e, datei=neu_name[e["datei"]], aus_projekt=q)
+                if klasse:
+                    n["klasse"] = klasse
+                # Ein vervielfaeltigtes Bild zeigt auf seine Vorlage -- unter
+                # ihrem Namen im Ziel.
+                if n.get("quelle"):
+                    n["quelle"] = neu_name.get(n["quelle"], n["quelle"])
+                _klasse_nummer(ziel, n["klasse"])
+                _verknuepfen(os.path.join(wurzel(q), ORDNER["ok"], e["datei"]),
+                             os.path.join(wurzel(ziel), ORDNER["ok"], n["datei"]))
+                daten.append(n)
+                zaehler["bilder"] += 1
+        _speichern(ziel, daten)
+    return zaehler
+
+
+def projekte_mit_daten() -> list[dict]:
+    """Je Projekt: wie viele Bilder aufgenommen sind, welche Klassen, und
+    aus welchen Projekten es selbst zusammengefuehrt ist."""
+    raus = []
+    for p in projekte.liste():
+        daten = eintraege(p["key"])
+        ok = [e for e in daten if e.get("status") == "ok" and e.get("box")]
+        raus.append({**p, "aufgenommen": len(ok),
+                     "pruefen": sum(1 for e in daten if e.get("status") == "pruefen"),
+                     "klassen": sorted({e.get("klasse") for e in ok if e.get("klasse")}),
+                     "aus": sorted({e["aus_projekt"] for e in daten if e.get("aus_projekt")})})
+    return raus
 
 
 # --- Erkennen -------------------------------------------------------------
@@ -625,6 +722,8 @@ def aufnehmen_gruppen(projekt: str, gruppen: list[dict], klasse: str, suche: str
             eintrag["echt"] = True
         if meta.get("foto"):
             eintrag["foto"] = meta["foto"]
+        if meta.get("kennzeichen"):
+            eintrag["kennzeichen"] = meta["kennzeichen"]
         neue.append(eintrag)
     with _sperre:
         daten = [e for e in eintraege(projekt)
