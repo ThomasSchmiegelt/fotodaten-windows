@@ -322,8 +322,10 @@ class Engine:
                       + (f" · {ausgefallen} ausgefallen" if ausgefallen else ""))
             prompt = job.get("prompt_cloud") or job["prompt"]
             try:
-                image_out = cloud.bild(prompt, width, height, images or None,
-                                       seed=job.get("seed"), schritte=steps)
+                image_out = cloud.bild(prompt, width, height,
+                                       job.get("vorlage_cloud") or images or None,
+                                       seed=job.get("seed"), schritte=steps,
+                                       staerke=job.get("staerke_cloud"))
             except RuntimeError:
                 in_folge += 1
                 ausgefallen += 1
@@ -331,7 +333,8 @@ class Engine:
                     raise
                 continue
             in_folge = 0
-            meta = {k: v for k, v in job.items() if k not in ("embeds", "prompt_cloud")}
+            meta = {k: v for k, v in job.items()
+                    if k not in ("embeds", "prompt_cloud", "vorlage_cloud", "staerke_cloud")}
             meta["prompt"] = prompt
             meta.update(index=index, effect=effect, form=form, cloud=True)
             results.append(meta)
@@ -572,12 +575,22 @@ class Engine:
         camera=None,
         kombinationen: list | None = None,
         beschreibung: str = "",
+        bewahren: bool = False,
+        vorlage_fuer=None,
         on_image=None,
     ) -> list[dict]:
         """Erzeugt `count` Bilder. `images` schaltet auf Referenzbilder um.
 
         `on_image(meta, pil)` wird nach jedem fertigen Bild aufgerufen, damit die
         Oberflaeche die Serie beim Entstehen zusehen kann.
+
+        `bewahren`: ein Bereich des Fotos wird danach aus dem Original
+        eingesetzt (fotodaten.bewahren). Ein img2img-Modell in der Cloud darf
+        das Foto dann nur wenig veraendern.
+
+        `vorlage_fuer(achsen)` gibt einem img2img-Modell in der Cloud je Bild
+        eine eigene Vorlage -- das Foto mit Farbe, Kamera, Boden und Licht
+        schon von Hand gesetzt (vorbehandeln.py). None heisst: das Foto.
         """
         images = images or []
         if len(images) > MAX_REFERENCES:
@@ -669,6 +682,20 @@ class Engine:
                                           **dict(picks, paint=None)).strip(" ,")
                     vorn = ", ".join(t for t in (farbe, achsen) if t)
                     job["prompt_cloud"] = f"{vorn}. {text}" if vorn else text
+                    if bewahren:
+                        # Sonst malt das Modell ein anderes Auto, die Kupplung
+                        # sitzt woanders, und eingesetzt wird nichts -- siehe
+                        # fotodaten.STAERKE_BEWAHREN.
+                        import fotodaten
+                        job["staerke_cloud"] = min(float(wolke.get("staerke") or 0.6),
+                                                   fotodaten.STAERKE_BEWAHREN)
+                    if vorlage_fuer:
+                        vor = vorlage_fuer(picks)
+                        if vor is not None:
+                            job["vorlage_cloud"] = [vor]
+                            # Bleibt in den Bilddaten: auftraege setzt dann
+                            # aus genau dieser Vorlage ein.
+                            job["vorbehandelt"] = True
             return self._aus_der_cloud(jobs, images, width, height, effect,
                                        form, on_image, steps)
         if not LOKAL:

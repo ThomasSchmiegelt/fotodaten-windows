@@ -78,7 +78,6 @@ nächsten Auftrags.
 | Gruppe | mehrere Personen in ein Bild |
 | Rundum | eine Person von allen Seiten |
 | Varianten | ein Basisbild vielfach abwandeln — etwa für Trainingsdaten |
-| Fotodaten | aus echten Fotos Varianten nach Plan, gleich mit Box im Datensatz |
 | Retusche | eine Stelle nachbessern: Fleck, schiefes Lächeln, Hand |
 | Ablauf | eine Bildfolge mit Video |
 | Bausteine | Personen, Orte, Gegenstände zum Wiederverwenden |
@@ -86,8 +85,19 @@ nächsten Auftrags.
 | Geschichte | eine Handlung in Szenen, Prompts und Bilder |
 | Katalog | alle Bausteine aus allen Projekten |
 | Sechs Seiten | ein Gegenstand von vorn, hinten, links, rechts, oben, unten |
-| Datensatz | Bounding Boxes prüfen, aufnehmen, korrigieren |
-| Training | einen Detektor (D-FINE oder YOLO26) trainieren und ausprobieren |
+
+Darunter, eigens umrahmt, **Eigener Detektor — der Reihe nach**:
+
+| Reiter | Wofür |
+|---|---|
+| ? Anleitung | die vier Schritte zum eigenen Detektor, mit Sprung in den jeweiligen Reiter |
+| 1 · Fotodaten | aus echten Fotos Varianten nach Plan, gleich mit Box im Datensatz |
+| 2 · Prüfen | Bounding Boxes prüfen, aufnehmen, korrigieren (der Datensatz) |
+| 3 · Trainieren | einen Detektor (D-FINE oder YOLO26) trainieren und ausprobieren |
+
+Unter diesen vier Reitern steht, wo das Projekt gerade steht (Fotos,
+aufgenommen, zu prüfen, Trainingsläufe), und **Als Nächstes** mit einem
+Verweis genau dorthin.
 
 **Der große Knopf unten** startet, was der Reiter verspricht. Seine
 Beschriftung sagt es jeweils („Erzeugen“, „Erstes Bild erzeugen“,
@@ -346,7 +356,7 @@ Der Haken funktioniert auch in Text→Bild und Bearbeiten.
 
 ### Schritt 3 — Prüfliste abarbeiten
 
-Reiter **Datensatz**, oben die Zahlen, darunter die Bilder:
+Reiter **2 · Prüfen** (der Datensatz), oben die Zahlen, darunter die Bilder:
 
 - **rote Box** = geht ins Label,
 - **gelb gestrichelt** = was Grounding DINO gefunden hat,
@@ -431,7 +441,7 @@ rechnet, unabhängig von der Kartengröße.
 
 ### Schritt 4 — Detektor trainieren
 
-Reiter **Training**. Die Einstellungen stehen als Tabelle:
+Reiter **3 · Trainieren**. Die Einstellungen stehen als Tabelle:
 
 | Feld | Empfehlung |
 |---|---|
@@ -483,7 +493,7 @@ mit RTX 1000 Ada (6 GB), eingerichtet mit `einrichten.bat training`:
 1. Auf dem ersten Rechner den ganzen Projektordner kopieren:
    `projekte\<Projekt>\` (darin `projekt.json` und `datensatz\`).
 2. Auf dem Trainingsrechner nach `projekte\` legen und `start.bat` starten.
-3. Kopfzeile › Projekt wählen, Reiter **Training**, `yolo26n` oder
+3. Kopfzeile › Projekt wählen, Reiter **3 · Trainieren**, `yolo26n` oder
    `yolo26s`, Bildgröße 640.
 
 Gemessen bei 640 px: yolo26n mit Stapel 16 und yolo26s mit Stapel 8 belegen
@@ -545,28 +555,35 @@ Der Datensatz selbst liegt in `projekte/<Projekt>/datensatz/` und ist
 ## 7a. Trainingsdaten aus echten Fotos
 
 Der kurze Weg, wenn es schon Fotos gibt — etwa von einem Auto mit
-Anhängerkupplung. Reiter **Fotodaten**:
+Anhängerkupplung. Reiter **1 · Fotodaten**, von oben nach unten:
 
-1. **Fotos** wählen, eines oder viele. Am besten über jedes Objekt mit der
-   Maus **eine Box ziehen** (grün). Ein Foto mit Box geht sofort als
-   aufgenommen in den Datensatz und ist der Bezug für seine Varianten; ohne
-   Box sucht der Erkenner sie wie bei jedem anderen Bild.
-2. **Klasse** (`anhaengerkupplung`), **Suchbegriff** (`tow hitch`),
-   **Motivart**, und bei der Farbachse, **was umgefärbt wird**
-   (`the car body`). Unter **Was unverändert bleiben muss** das Objekt
-   selbst — „The black tow hitch with the ball neck and its socket“.
-3. **Achsen** anhaken und je Achse die Werte wählen:
+1. **Was soll erkannt werden:** **Klasse** (`anhaengerkupplung`),
+   **Suchbegriff** (`tow hitch`), **Motivart**, und das Objekt in einem
+   englischen Satz — „The black tow hitch with the ball neck and its socket“.
+2. **Fotos laden und ausmalen**, eines oder viele. Je Foto **⤢ ausmalen**:
+   - **🖌 Objekt** — nur die Kupplung, ganz, auch die Kugel. Diese Pixel
+     kommen in jede Variante zurück, die Box ergibt sich daraus.
+   - **🟫 Boden** — die freie Bodenfläche, grob mit großem Pinsel. Nur für
+     die Achse Untergrund nötig.
+   - Der Radierer nimmt beides weg. Wer nicht malt, kann stattdessen eine
+     **Box** ziehen; ohne beides sucht der Erkenner die Box.
+
+   Unter jedem Foto steht als Checkliste, was gemalt ist.
+3. **Was sich ändern darf:** oben, **was umgefärbt wird** (`the car body`),
+   darunter die Achsen anhaken und je Achse die Werte wählen:
 
    | Achse | ändert |
    |---|---|
    | Farbe | die Farbe des Fahrzeugs (bzw. was oben als Ziel steht) |
-   | Untergrund / Umgebung | Schotter, Schnee, Tiefgarage, Waldweg … |
-   | Kameraposition | bodennah, schräg von links, erhöht, nah … |
-   | Licht | goldene Stunde, Neon, Gegenlicht, Nebel … |
+   | Untergrund | Asphalt, nasser Asphalt, Schotter, feiner Kies, Rasen, Wiese, Kopfsteinpflaster, Pflastersteine, Rasengitter, Beton, Feldweg, Matsch, Sand, Laub, Schnee |
+   | Kameraposition | leicht/schräg von links oder rechts, bodennah, erhöht, gekippt, nah … |
+   | Licht | goldene Stunde, blaue Stunde, Neon, Gegenlicht, Nebel, Seitenlicht, bewölkt … |
    | Farbstimmung, Kameraart, Werkstoff | wahlweise dazu |
 
    Nicht angehakte Achsen bleiben wie im Foto. Der Stil steht fest auf Foto.
-4. **Plan** wählen:
+   Bei einem Cloud-Bildmodell steht unter jeder angehakten Achse, wie sie
+   dort wirkt (siehe unten).
+4. **Wie viele:** den **Plan** wählen:
 
    | Plan | was entsteht |
    |---|---|
@@ -577,7 +594,11 @@ Anhängerkupplung. Reiter **Fotodaten**:
 
    Unter dem Plan steht, wie viele Bilder das ergibt — bei einem
    Cloud-Bildmodell ist das auch die Zahl der bezahlten Bilder.
-5. Großer Knopf **Fotodaten erzeugen**.
+   Schritte, Kantenlänge und die Haken (Originale mit hinein, Boxen setzen,
+   Objekt einsetzen, Licht angleichen, Cloud-Vorbehandlung) liegen unter
+   **Feineinstellung**.
+5. Großer Knopf **Fotodaten erzeugen**. Fenster offen lassen, bis die
+   Statuszeile „Datensatz: … aufgenommen“ meldet.
 
 Erst rechnet das Bildmodell alle Fotos durch, danach laden die
 Box-Erkenner einmal für alles. Am Ende meldet die Statuszeile z. B.
@@ -593,24 +614,59 @@ der Variante sitzt, und setzt dort genau die gemalten Pixel aus dem Original
 ein — mit weicher Kante, ans neue Licht angeglichen. Die Box ergibt sich dann
 exakt aus der Maske, ohne Erkenner.
 
-Eingesetzt wird nur, wenn die Stelle sicher gefunden ist (Güte ab 0,35).
-Hat das Bildmodell das Objekt woanders hingemalt, stünden danach zwei
-Kupplungen im Bild; dann bleibt die Variante, wie sie ist, und die Erkenner
-setzen die Box. Gemessen:
+Eingesetzt wird nur, wenn die Stelle sicher und eindeutig gefunden ist
+(Güte ab 0,35, kein besserer Kandidat weiter weg). Hat das Bildmodell das
+Objekt woanders hingemalt oder durch etwas anderes ersetzt, stünden danach
+zwei im Bild; dann bleibt die Variante, wie sie ist, und die Erkenner setzen
+die Box.
 
-| Bildmodell | Lage gefunden | Ergebnis |
+**In der Cloud (Z Image Turbo, franconia.ai)** malt das Modell das ganze
+Foto neu, und bei der eingestellten Stärke 0,7 steht danach ein anderes Auto
+da, die Kupplung woanders. Ist eine Maske gemalt, rechnet das Programm
+deshalb von selbst mit **Stärke höchstens 0,4**. Bei so wenig Stärke würde
+das Modell die Farbe aber nicht mehr wechseln (es tat es nicht einmal bei
+0,7). Darum wird die Karosserie vorher **lokal vorgefärbt**: die
+vorherrschende bunte Fläche des Fotos bekommt den Zielton, Glanz und
+Schatten bleiben, und das Modell zeichnet das glaubhaft nach. Eingesetzt
+wird dann aus dem vorgefärbten Foto, damit ein Maskenrand auf dem Lack keinen
+Saum in der alten Farbe hinterlässt. Gemessen am blauen BMW:
+
+| Stärke | Güte | Ergebnis |
 |---|---|---|
-| Qwen-Image lokal (3090) | Güte 0,5–0,9, außer bei gewürfelter Kameraposition | echte Kupplung nahtlos eingesetzt |
-| Z Image Turbo (franconia.ai) | Güte 0,2–0,4 | zeichnet die Kupplung an anderer Stelle und Größe neu; eingesetzt wird nichts |
+| 0,3 | 0,71 | Auto und Kupplung bleiben an ihrem Platz |
+| 0,4 (mit Maske) | 0,39–0,62 | rot, schwarz, gelb: echte Kupplung eingesetzt; silber: Kupplung vom Modell ersetzt, nicht eingesetzt |
+| 0,7 | 0,25 | anderes Auto, nichts eingesetzt |
 
-franconia.ai nimmt außerdem keine Inpainting-Maske an (geprüft: mit und ohne
-`mask` kommt bei gleichem Seed dasselbe Bild). **Soll die echte Kupplung
-erhalten bleiben, die Varianten also mit Qwen-Image auf der großen Karte
-rechnen** (Cloud-Modelle › Bildmodell: Haken „Cloud statt lokal“ weg).
+**Kamera, Licht und Untergrund in der Cloud.** Bei Stärke 0,4 malt das
+Modell das Foto nur nach. Gemessen am blauen BMW: alle zehn Kamerapositionen
+und alle neun Lichter ergaben dasselbe Foto, nur das Kennzeichen war
+verwürfelt. Deshalb setzt das Programm vorher selbst, was das Modell dann
+nur noch angleicht (Haken **Cloud: Kamera, Farbe, Boden und Licht vorher
+selbst setzen** unter Feineinstellung):
+
+| Achse | was vorher passiert |
+|---|---|
+| Kamera | das Foto wird perspektivisch verzogen (schräg, bodennah, erhöht), beschnitten (nah) oder gekippt; gemaltes Objekt und Boden wandern exakt mit, die Box auch. „Abstand“ und „Aufrecht“ gehen so nicht und wirken nur über den Text |
+| Farbe | die vorherrschende bunte Fläche bekommt den Zielton |
+| Untergrund | die gemalte Bodenfläche bekommt ein Bild der Sorte, mit dem Schatten des Fotos. Jede Sorte malt die Cloud beim ersten Mal einmal (ein bezahltes Bild), danach liegt sie unter `modelle\untergrund\` |
+| Licht | Farbton, Kontrast und Lichtverlauf; Rückleuchten bleiben im Dunkeln hell |
+
+Eingesetzt wird danach aus genau dieser Vorlage. Gemessen mit einem
+Testlauf (je eine Achse): schräg, nah, golden, Schotter und rot — alle fünf
+mit eingesetzter Kupplung, Güte 0,39–0,54, die Box an der neuen Stelle.
+
+Grenzen: Ist das Auto selbst unbunt (weiß, schwarz, silber), findet das
+Vorfärben keine Fläche, und die Farbe hängt am Prompt allein. Ohne gemalten
+Boden bleibt der Untergrund fast, wie er ist. Farbstimmung, Kameraart und
+Werkstoff laufen nur über den Text und wirken in der Cloud kaum. Wer volle
+Vielfalt *und* die echte Kupplung will, rechnet die Varianten mit Qwen-Image
+auf der großen Karte (Cloud-Modelle › Bildmodell: Haken „Cloud statt lokal“
+weg); dort gelingt das Einsetzen mit Güte 0,5–0,9. Die Vorbehandlung gilt
+nur für das Cloud-Modell.
 
 **Gut zu wissen**
 
-- Im Reiter **Datensatz** lässt sich jedes Bild über **⤢ groß** im selben
+- Im Reiter **2 · Prüfen** lässt sich jedes Bild über **⤢ groß** im selben
   Editor öffnen und die Box dort genau ziehen; danach ✓ aufnehmen.
 - **Handyfotos** werden nach ihrem EXIF-Vermerk aufgerichtet, so wie der
   Browser sie zeigt. Große Fotos werden auf 2048 px verkleinert.

@@ -336,7 +336,8 @@ _ohne_zusatz: set = set()
 
 
 def bild(prompt: str, breite: int, hoehe: int, vorlagen: list | None = None,
-         timeout: int = 300, seed: int | None = None, schritte: int | None = None):
+         timeout: int = 300, seed: int | None = None, schritte: int | None = None,
+         staerke: float | None = None):
     """Ein Bild vom Cloud-Bildmodell. Mit Vorlagen ueber /images/edits.
 
     Seed, Schrittzahl und -- bei einem Beschreibungs-Modell -- die img2img-
@@ -345,6 +346,9 @@ def bild(prompt: str, breite: int, hoehe: int, vorlagen: list | None = None,
     ein Cloud-Bild dann wiederholbar wie ein lokales. Lehnt ein Anbieter die
     Felder ab (400), geht derselbe Aufruf einmal ohne sie, und dieser
     Anbieter bekommt sie danach nicht mehr.
+
+    `staerke` ersetzt fuer diesen einen Aufruf die eingestellte Staerke --
+    etwa wenn ein bewahrter Bereich verlangt, dass das Foto stehen bleibt.
     """
     from PIL import Image
 
@@ -359,7 +363,7 @@ def bild(prompt: str, breite: int, hoehe: int, vorlagen: list | None = None,
         if schritte:
             zusatz["num_inference_steps"] = int(schritte)
         if vorlagen and e.get("art") == "beschreibung":
-            zusatz["strength"] = float(e.get("staerke") or 0.6)
+            zusatz["strength"] = float(staerke or e.get("staerke") or 0.6)
 
     def senden(mit: dict):
         if vorlagen:

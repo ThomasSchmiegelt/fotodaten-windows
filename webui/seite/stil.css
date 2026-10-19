@@ -625,3 +625,26 @@
 /* Die gemalte Maske ueber dem Vorschaubild einer Fotokachel. */
 .dsflaeche .fdmaske { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: .45;
   pointer-events: none; }
+
+/* Der Weg zum eigenen Detektor: eigene Reiterzeile mit Nummern, darunter
+   der Stand des Projekts und der naechste Schritt. */
+.weg { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px 8px; margin: -4px 0 12px; }
+.wegkopf { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; margin: 0 0 6px 2px; }
+.tabs.tabsweg { margin-bottom: 0; }
+#wegStand { margin: 8px 2px 0; }
+
+/* Fotodaten und Anleitung: die Stufen in ihrer Reihenfolge. */
+#fotodatenBox h3.stufe, #anleitungBox h3.stufe {
+  font-size: 12px; color: var(--text); text-transform: uppercase;
+  letter-spacing: .06em; margin: 18px 0 2px; padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+#anleitungBox h3.stufe a { font-size: 11px; text-transform: none; letter-spacing: 0; margin-left: 8px; }
+ol.anleitung, ul.anleitung { margin: 6px 0 0; padding-left: 20px; font-size: 12.5px; line-height: 1.55; }
+ol.anleitung li, ul.anleitung li { margin-bottom: 4px; }
+ol.anleitung ul { padding-left: 18px; margin: 4px 0; }
+.fdpunkt { color: var(--muted); }
+.fdpunkt.an { color: var(--ok); }
+.fdwirkung { margin: 2px 0 0 24px; }
+details.fdfein { margin-top: 10px; }
+details.fdfein summary { cursor: pointer; font-size: 12px; color: var(--muted); }

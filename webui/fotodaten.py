@@ -55,6 +55,22 @@ ACHSEN = {
     "device":   "Kameraart",
     "material": "Werkstoff",
 }
+# Wie eine Achse bei einem img2img-Modell in der Cloud wirkt. Die Seite zeigt
+# es unter der Achse -- sonst haelt man eine Achse fuer kaputt, die dort nur
+# ueber den Prompt laeuft und deshalb kaum etwas tut.
+WIRKUNG_CLOUD = {
+    "paint": "Wird vorher selbst umgefärbt, das Modell gleicht an. Klappt bei "
+             "bunten Autos; ein weißes, schwarzes oder silbernes bleibt fast, wie es ist.",
+    "scene": "Braucht den gemalten Boden (⤢ ausmalen › 🟫 Boden). Ohne ihn nur "
+             "über den Text — das wirkt in der Cloud kaum. Jede Sorte wird beim "
+             "ersten Mal einmal von der Cloud gemalt (ein Bild).",
+    "angle": "Das Foto wird selbst verzogen, beschnitten oder gekippt, die Box "
+             "wandert mit. „Abstand“ und „Aufrecht“ wirken nur über den Text.",
+    "light": "Licht und Stimmung werden selbst gesetzt, das Modell gleicht an.",
+    "palette": "Nur über den Text — wirkt in der Cloud kaum.",
+    "device": "Nur über den Text — wirkt in der Cloud kaum.",
+    "material": "Nur über den Text — wirkt in der Cloud kaum.",
+}
 ARTEN = ("einzeln", "kombiniert", "beides", "alle")
 MAX_ALLE = 500
 MAX_JE_FOTO = 500
@@ -67,6 +83,12 @@ def tabellen(subject: str) -> dict:
     """Je Achse die erlaubten Werte fuer diese Motivart."""
     alle = variant_axes(subject)
     return {k: alle[k] for k in ACHSEN if k in alle}
+
+
+def namen(subject: str) -> dict:
+    """Die Achsennamen fuer die Oberflaeche. Beim Fahrzeug ist die Szene der
+    Untergrund (motiv.VEHICLE_SCENES), sonst die Umgebung."""
+    return dict(ACHSEN, scene="Untergrund" if subject == "fahrzeug" else "Umgebung")
 
 
 def katalog(subject: str) -> dict:
@@ -180,9 +202,15 @@ def vorbereiten(bild: Image.Image) -> Image.Image:
 # normierte Korrelation in einem Fenster von +-8 % der Bildgroesse. Kanten
 # statt Farben, weil sich die Farben ja gerade aendern sollen.
 
-LAGE_SICHER = 0.35        # darunter: eingesetzt, aber auf die Pruefliste
+LAGE_SICHER = 0.35        # darunter wird nicht eingesetzt (siehe datensatz)
 SUCHFENSTER = 0.08        # Anteil der Bildkante, um den gesucht wird
 ANALYSE = 320             # Kante, auf der gesucht wird
+# Abzug fuer weite Spruenge, am Rand des Suchfensters so viel. Das Foto
+# verrutscht nur wenig; ein weiter Sprung trifft eher eine aehnliche Kante
+# daneben. Gemessen (Z Image Turbo, Staerke 0,4, silberner BMW): ohne Abzug
+# sprang die Kupplung 92 px nach links auf die Stossstange, Guete 0,41 --
+# an der richtigen Stelle 0,40.
+SPRUNG_ABZUG = 0.15
 
 
 def maske_lesen(bild: Image.Image, groesse: tuple) -> Image.Image | None:
@@ -203,11 +231,13 @@ def _kanten(bild: Image.Image, f: int):
 
 
 def ausrichten(original: Image.Image, maske: Image.Image,
-               variante: Image.Image) -> tuple[int, int, float]:
-    """Wohin ist der gemalte Bereich in der Variante gewandert? (dx, dy, Guete).
+               variante: Image.Image) -> tuple[int, int, float, bool]:
+    """Wohin ist der gemalte Bereich in der Variante gewandert?
 
-    Alle drei Bilder in derselben Groesse. Guete ist die Korrelation der
-    Kantenbilder, 1 hiesse deckungsgleich.
+    Zurueck (dx, dy, Guete, eindeutig). Alle drei Bilder in derselben
+    Groesse. Guete ist die Korrelation der Kantenbilder, 1 hiesse
+    deckungsgleich. Nicht eindeutig ist die Lage, wenn ein weit entfernter
+    Kandidat ohne den Sprung-Abzug besser abschnitte.
     """
     import numpy as np
     breite, hoehe = original.size
@@ -221,7 +251,7 @@ def ausrichten(original: Image.Image, maske: Image.Image,
     a = a - a.mean()
     na = np.sqrt((a * a).sum()) or 1.0
     r = max(1, int(SUCHFENSTER * max(breite, hoehe) / f))
-    beste = (0, 0, -1.0)
+    werte = {}
     for oy in range(-r, r + 1):
         for ox in range(-r, r + 1):
             ya, xa = p[1] + oy, p[0] + ox
@@ -229,18 +259,22 @@ def ausrichten(original: Image.Image, maske: Image.Image,
                 continue
             w = b[ya:ya + a.shape[0], xa:xa + a.shape[1]]
             w = w - w.mean()
-            wert = float((a * w).sum() / (na * (np.sqrt((w * w).sum()) or 1.0)))
-            if wert > beste[2]:
-                beste = (ox * f, oy * f, wert)
-    return beste
+            werte[ox, oy] = float((a * w).sum() / (na * (np.sqrt((w * w).sum()) or 1.0)))
+    if not werte:
+        return 0, 0, -1.0, False
+    ox, oy = max(werte, key=lambda d: werte[d] - SPRUNG_ABZUG * (d[0] ** 2 + d[1] ** 2) / r ** 2)
+    weit = [w for d, w in werte.items()
+            if (d[0] - ox) ** 2 + (d[1] - oy) ** 2 > (0.25 * r) ** 2]
+    eindeutig = not weit or max(weit) <= werte[ox, oy]
+    return ox * f, oy * f, werte[ox, oy], eindeutig
 
 
 def bewahren(original: Image.Image, maske: Image.Image, variante: Image.Image,
-             licht: bool = True) -> tuple[Image.Image, list, float]:
+             licht: bool = True) -> tuple[Image.Image, list, float, bool]:
     """Den gemalten Bereich aus dem Original in die Variante setzen.
 
     Zurueck: das Bild, die Box des eingesetzten Bereichs (in Pixeln der
-    Variante) und die Guete der Ausrichtung.
+    Variante), die Guete der Ausrichtung und ob die Lage eindeutig war.
 
     `licht` gleicht die Helligkeit an die Variante an -- sonst stuende eine
     taghelle Kupplung in einer Neonnacht. Gemessen wird die Helligkeit des
@@ -252,7 +286,7 @@ def bewahren(original: Image.Image, maske: Image.Image, variante: Image.Image,
     if original.size != variante.size:
         original = original.resize(variante.size, Image.LANCZOS)
         maske = maske.resize(variante.size, Image.NEAREST)
-    dx, dy, guete = ausrichten(original, maske, variante)
+    dx, dy, guete, eindeutig = ausrichten(original, maske, variante)
     quelle = Image.new("RGB", variante.size)
     quelle.paste(original.convert("RGB"), (dx, dy))
     lage = Image.new("L", variante.size, 0)
@@ -270,7 +304,18 @@ def bewahren(original: Image.Image, maske: Image.Image, variante: Image.Image,
     fertig = variante.copy()
     fertig.paste(quelle, (0, 0), weich)
     box = lage.getbbox()
-    return fertig, [box[0], box[1], box[2], box[3]], round(guete, 3)
+    return fertig, [box[0], box[1], box[2], box[3]], round(guete, 3), eindeutig
+
+
+# --- Wenig Staerke in der Cloud ---------------------------------------------
+#
+# Damit `bewahren` die Kupplung wiederfindet, darf Z Image Turbo das Foto nur
+# wenig veraendern. Gemessen am blauen BMW, gleicher Seed: Staerke 0,3
+# Guete 0,71, 0,5 Guete 0,51, 0,7 Guete 0,25 -- dort steht ein anderes Auto
+# mit der Kupplung woanders. Was das Modell bei so wenig Staerke nicht mehr
+# kann (Farbe, Kamera, Licht, Untergrund), macht vorbehandeln.py vorher.
+
+STAERKE_BEWAHREN = 0.4
 
 
 def verkleinert(bild: Image.Image, kante: int) -> Image.Image:

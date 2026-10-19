@@ -29,7 +29,7 @@ from datetime import datetime
 from PIL import Image, ImageOps, PngImagePlugin
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from engine import Engine  # noqa: E402
+from engine import Engine, _axis as engine_achse  # noqa: E402
 import sprache as chat  # noqa: E402
 import ablauf  # noqa: E402
 import demo  # noqa: E402
@@ -42,6 +42,7 @@ import cloud  # noqa: E402
 import datensatz  # noqa: E402
 import detektor  # noqa: E402
 import fotodaten  # noqa: E402
+import vorbehandeln  # noqa: E402
 import sechsseiten  # noqa: E402
 import retusche  # noqa: E402
 import vervielfaeltigen  # noqa: E402
@@ -595,6 +596,7 @@ def run_fotodaten(params: dict) -> None:
         fotos = [f for f in (params.get("fotos") or []) if f.get("bild")]
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         seed = int(params.get("seed") or 0) or random.randrange(1, 2 ** 31)
+        untergrund = {k: v[1] for k, v in fotodaten.tabellen(subject).get("scene", {}).items()}
         gruppen = []
         for nr, foto in enumerate(fotos, start=1):
             # `aborted` und nicht `_cancel`: run_series setzt `_cancel` bei
@@ -611,6 +613,9 @@ def run_fotodaten(params: dict) -> None:
             maske = fotodaten.maske_lesen(decode(foto["maske"]), bild.size)                 if foto.get("maske") else None
             if maske is not None and not box:
                 box = list(maske.getbbox())
+            # Der gemalte Boden: dort kommt bei der Achse Untergrund die
+            # neue Sorte hinein (vorbehandeln.boden).
+            boden = fotodaten.maske_lesen(decode(foto["boden"]), bild.size)                 if foto.get("boden") else None
             name_original = None
             if params.get("original", True):
                 # Nummer 00 vor den Varianten: so steht das Original in der
@@ -625,10 +630,33 @@ def run_fotodaten(params: dict) -> None:
                                         int(params.get("anzahl") or 12),
                                         seed + nr, subject)
             entstanden = []
+            # Die Vorlage je Belegung -- einmal fuer das Bildmodell, und
+            # gleich danach noch einmal, um aus ihr einzusetzen. Nur die
+            # letzten paar gemerkt: bei 500 Belegungen je Foto waeren alle
+            # zusammen Gigabytes.
+            vorrat = {}
+
+            def vorbereitet(achsen, _bild=bild, _maske=maske, _boden=boden,
+                            _vorrat=vorrat):
+                wahl = {k: achsen.get(k) for k in ("angle", "paint", "scene", "light")}
+                schluessel = tuple(wahl.values())
+                if schluessel not in _vorrat:
+                    if len(_vorrat) > 3:
+                        _vorrat.clear()
+                    _vorrat[schluessel] = vorbehandeln.anwenden(
+                        _bild, wahl, _maske, _boden, untergrund)
+                return _vorrat[schluessel]
 
             def on_image(meta, image, _kind=kind, _liste=entstanden, _maske=maske,
-                         _bild=bild):
+                         _bild=bild, _vorbereitet=vorbereitet):
                 meta = dict(meta, foto=_kind)
+                if meta.get("vorbehandelt") and _maske is not None:
+                    # Eingesetzt wird aus der Vorlage, die das Modell sah:
+                    # die Kupplung ist darin dieselbe, sitzt aber dort, wohin
+                    # die Kamera sie geschoben hat, und was die Maske vom Lack
+                    # streift, hat schon die neue Farbe.
+                    _bild, _maske = _vorbereitet({k: engine_achse(meta.get(k)) for k in
+                                                  ("angle", "paint", "scene", "light")})
                 if _maske is not None and params.get("bewahren", True):
                     # Die Originalpixel zurueck -- siehe fotodaten.bewahren.
                     # Nur wenn die Stelle sicher gefunden ist: hat das
@@ -636,10 +664,14 @@ def run_fotodaten(params: dict) -> None:
                     # Z Image Turbo und bei gewuerfelter Kameraposition),
                     # stuenden danach zwei Kupplungen im Bild. Dann bleibt
                     # die Variante, wie sie ist, und die Erkenner suchen.
-                    neu, box_neu, lage = fotodaten.bewahren(
+                    neu, box_neu, lage, eindeutig = fotodaten.bewahren(
                         _bild, _maske, image, licht=params.get("licht", True))
                     meta["lage"] = lage
-                    if lage >= datensatz.LAGE_SICHER:
+                    # Nicht eindeutig: ein Kandidat weiter weg schnitte
+                    # besser ab. Gemessen hatte das Modell dort die Kupplung
+                    # durch etwas anderes ersetzt und die Stossstange
+                    # verschoben -- eingesetzt stuende sie doppelt im Bild.
+                    if lage >= datensatz.LAGE_SICHER and eindeutig:
                         image, meta["box_bekannt"] = neu, box_neu
                 name = _save(meta, image, stamp, _kind)
                 current["files"].append(name)
@@ -667,7 +699,10 @@ def run_fotodaten(params: dict) -> None:
                 steps=int(params.get("steps") or 30), seed=seed + 1000 * nr,
                 true_cfg_scale=_cfg_fuer(params), keep=keep, subject=subject,
                 paint_target=params.get("paint_target") or "",
-                kombinationen=belegungen, on_image=on_image)
+                kombinationen=belegungen, on_image=on_image,
+                bewahren=maske is not None and params.get("bewahren", True),
+                vorlage_fuer=(lambda achsen, _v=vorbereitet: _v(achsen)[0])
+                if params.get("vorbehandeln", True) else None)
             gruppen.append({"basis": bild, "basis_box": box,
                             "original": (os.path.join(ziel(), name_original),
                                          {"foto": kind}) if name_original else None,

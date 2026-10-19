@@ -1102,8 +1102,12 @@ class Handler(BaseHTTPRequestHandler):
             was = params.get("tu") or "katalog"
             subject = params.get("subject") or "fahrzeug"
             if was == "katalog":
+                wolke = cloud.aktiv("bild")
                 return self._json(200, {"achsen": fotodaten.katalog(subject),
-                                        "namen": fotodaten.ACHSEN,
+                                        "namen": fotodaten.namen(subject),
+                                        "wirkung": fotodaten.WIRKUNG_CLOUD
+                                        if wolke and wolke.get("art") == "beschreibung"
+                                        else {},
                                         "arten": list(fotodaten.ARTEN),
                                         "max_alle": fotodaten.MAX_ALLE,
                                         "cloud": bool(cloud.aktiv("bild")),

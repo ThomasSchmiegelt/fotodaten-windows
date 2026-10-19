@@ -10,19 +10,27 @@ from .anmutung import (
     BEKLEIDUNGEN, DEVICES, HALTUNGEN, PAINTS, PALETTEN, STYLES, VARIANT_LIGHTS,
 )
 
+# Fuer ein Fahrzeug der Untergrund, nicht die Umgebung: eine Kupplung sitzt
+# dicht ueber dem Boden, und was der Detektor lernen muss, ist sie vor
+# Schotter, Gras, Pflaster und nassem Asphalt -- nicht vor einer Tiefgarage
+# im Hintergrund. Die Schluessel aelterer Datensaetze bleiben, wo der Sinn
+# derselbe ist (hof, schotter, wiese, regen, schnee).
 VEHICLE_SCENES = {
-    "hof":      ("Hofeinfahrt", "standing on a paved driveway in front of a house"),
-    "schotter": ("Schotterplatz", "standing on a gravel yard"),
-    "wiese":    ("Feldweg", "standing on a dirt track next to a green field"),
-    "wald":     ("Waldweg", "standing on a forest track surrounded by trees"),
-    "tiefgarage": ("Tiefgarage", "standing in an underground car park with concrete pillars"),
-    "werkstatt": ("Werkstatt", "standing inside a repair workshop with tools on the walls"),
+    "asphalt":  ("Asphalt", "standing on dry grey asphalt"),
+    "regen":    ("Nasser Asphalt", "standing on wet dark asphalt with rain puddles and reflections"),
+    "schotter": ("Schotter", "standing on coarse grey gravel"),
+    "splitt":   ("Feiner Kies", "standing on fine light pea gravel"),
+    "gras":     ("Rasen", "standing on short mown green lawn"),
+    "wiese":    ("Wiese", "standing in a meadow with tall grass and wild flowers"),
+    "kopfstein": ("Kopfsteinpflaster", "standing on old rounded cobblestones"),
+    "hof":      ("Pflastersteine", "standing on grey concrete paving stones"),
+    "rasengitter": ("Rasengitter", "standing on grass paver blocks with grass growing through"),
+    "beton":    ("Beton", "standing on a smooth grey concrete floor"),
+    "erde":     ("Feldweg", "standing on a dry dirt track"),
+    "matsch":   ("Matsch", "standing on muddy ground with tyre ruts"),
+    "sand":     ("Sand", "standing on loose sand"),
+    "laub":     ("Laub", "standing on ground covered in fallen autumn leaves"),
     "schnee":   ("Schnee", "standing on a snow-covered surface in winter"),
-    "stadt":    ("Stadtstraße", "parked at the kerb of a city street with buildings behind"),
-    "strand":   ("Strandparkplatz", "standing on a sandy car park near the sea"),
-    "regen":    ("Nasse Fahrbahn", "standing on wet asphalt with rain puddles"),
-    "halle":    ("Lagerhalle", "standing inside a bright warehouse hall"),
-    "baustelle": ("Baustelle", "standing on a muddy construction site"),
 }
 
 
@@ -39,6 +47,8 @@ VEHICLE_ANGLES = {
     "nah":        ("Nahaufnahme", "a close-up filling most of the frame"),
     "weit":       ("Abstand", "seen from further away with the whole rear of the vehicle visible"),
     "hochkant":   ("Aufrecht", "an upright portrait framing of the rear"),
+    "gekipptlinks": ("Gekippt links", "a handheld shot with the camera tilted a few degrees to the left"),
+    "gekipptrechts": ("Gekippt rechts", "a handheld shot with the camera tilted a few degrees to the right"),
 }
 
 

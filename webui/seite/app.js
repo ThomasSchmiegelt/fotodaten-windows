@@ -26,6 +26,7 @@ const MODES = {
   datensatz: {label: "Liste neu laden", refs: 0, ph: "", hint: () => ""},
   training: {label: "Detektor trainieren", refs: 0, ph: "", hint: () => ""},
   fotodaten: {label: "Fotodaten erzeugen", refs: 0, ph: "", hint: () => ""},
+  anleitung: {label: "Mit Schritt 1 anfangen", refs: 0, ph: "", hint: () => ""},
   retusche: {label: "Retuschieren", refs: 0, ph: "", hint: () => ""},
   varianten: {label: "Varianten erzeugen", refs: 1, sweep: "varianten", count: 12,
               follow: true, lock: false,
@@ -298,6 +299,9 @@ function setMode(next) {
   const istFotodaten = next === "fotodaten";
   $("fotodatenBox").style.display = istFotodaten ? "block" : "none";
   if (istFotodaten) fdHolen();
+  const istAnleitung = next === "anleitung";
+  $("anleitungBox").style.display = istAnleitung ? "block" : "none";
+  wegZeigen();
   const istRetusche = next === "retusche";
   $("retuscheBox").style.display = istRetusche ? "block" : "none";
   $("szenenBox").style.display = istSzenen ? "block" : "none";
@@ -306,7 +310,7 @@ function setMode(next) {
   // Kaesten nicht -- Prompt, Darstellung, Bildgroesse.
   const eigen = istDemo || istBausteine || istSzenen || istGeschichte
                 || istKatalog || istSeiten || istDatensatz || istTraining
-                || istRetusche || istFotodaten;
+                || istRetusche || istFotodaten || istAnleitung;
   eigenerReiter = eigen;
   $("demoBox").style.display = istDemo ? "block" : "none";
   $("bausteinBox").style.display = istBausteine ? "block" : "none";
@@ -931,6 +935,7 @@ async function start() {
   poll();
 }
 $("go").onclick = () => {
+  if (mode === "anleitung") return setMode("fotodaten");
   if (mode === "demo") return starteDemo();
   if (mode === "seiten") return seitenStarten();
   if (mode === "datensatz") return datensatzHolen();
@@ -3787,11 +3792,55 @@ $("detBild").onchange = () => {
   leser.readAsDataURL(datei);
 };
 
+// ---------- Der Weg zum eigenen Detektor ----------
+// Vier Reiter der Reihe nach (Anleitung, Fotodaten, Pruefen, Trainieren).
+// Die Zeile darunter sagt, wo das Projekt steht und was als Naechstes
+// kommt -- mit einem Verweis genau dorthin.
+const WEG = ["anleitung", "fotodaten", "datensatz", "training"];
+
+async function wegZeigen() {
+  const el = $("wegStand");
+  if (!WEG.includes(mode)) { el.style.display = "none"; return; }
+  const [ds, det] = await Promise.all([
+    fetch("/api/datensatz", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({tu: "liste"})}).then(r => r.json()).catch(() => null),
+    fetch("/api/detektor", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({tu: "liste"})}).then(r => r.json()).catch(() => null)]);
+  if (!WEG.includes(mode) || !ds || ds.error) return;
+  const z = ds.zahlen || {}, ok = z.ok || 0, pruefen = z.pruefen || 0;
+  const fertig = ((det && det.laeufe) || []).filter(l => l.gewichte);
+  const besterWert = fertig.reduce((m, l) => Math.max(m, (l.beste || {}).map50 || 0), 0);
+  const fotos = FDFOTOS.length, gemalt = FDFOTOS.filter(f => f.maske).length;
+  let weiter;
+  if (pruefen) weiter = ["datensatz", `2 · ${pruefen} Bild(er) prüfen`];
+  else if (!ok && !fotos) weiter = ["fotodaten", "1 · Fotos laden und ausmalen"];
+  else if (!ok) weiter = ["fotodaten", "1 · Fotodaten erzeugen (großer Knopf unten)"];
+  else if (!fertig.length) weiter = ["training", "3 · Detektor trainieren"];
+  else weiter = ["training", "unten bei Ausprobieren ein echtes Foto testen"];
+  el.innerHTML = `Projekt <b>${esc(ds.projekt || "allgemein")}</b>: `
+    + (fotos ? `${fotos} Foto(s) geladen, ${gemalt} ausgemalt · ` : "")
+    + `<b>${ok}</b> aufgenommen · <b>${pruefen}</b> zu prüfen · `
+    + (fertig.length ? `${fertig.length} Trainingslauf/-läufe, bester mAP50 ${detZahl(besterWert)}`
+                     : "noch nicht trainiert")
+    + `<br><b>Als Nächstes:</b> <a href="#" data-geh="${weiter[0]}">${weiter[1]} →</a>`;
+  el.style.display = "block";
+}
+
+// Verweise mit data-geh springen in einen Reiter -- in der Anleitung, in
+// der Schrittleiste und am Ende der Fotodaten.
+document.addEventListener("click", ev => {
+  const a = ev.target.closest("[data-geh]");
+  if (!a) return;
+  ev.preventDefault();
+  setMode(a.dataset.geh);
+  document.querySelector(".weg").scrollIntoView({block: "nearest"});
+});
+
 // ---------- Fotodaten: echte Fotos zu Trainingsdaten ----------
 // Fotos hochladen, wahlweise die Box von Hand ziehen, Achsen und Werte
 // waehlen. Der Server rechnet die Varianten nach Plan (fotodaten.py) und
 // legt alles mit Box in den Datensatz.
-let FDFOTOS = [], FDKATALOG = {}, FDNAMEN = {}, FDWAHL = {}, fdPlanUhr = null;
+let FDFOTOS = [], FDKATALOG = {}, FDNAMEN = {}, FDWIRKUNG = {}, FDWAHL = {}, fdPlanUhr = null;
 // Was voreingestellt angehakt ist: die vier Achsen aus dem Beispiel.
 const FD_VORGABE = ["paint", "scene", "angle", "light"];
 
@@ -3812,6 +3861,7 @@ async function fdHolen() {
   if (!g) return;
   FDKATALOG = g.achsen || {};
   FDNAMEN = g.namen || {};
+  FDWIRKUNG = g.wirkung || {};
   $("fdBildmodell").innerHTML = g.cloud
     ? "Bildmodell: <b>Cloud</b> (Kopfzeile › Cloud-Modelle). Jedes Bild kostet dort Geld — die Vorschau unten zählt mit."
     : g.lokal ? "Bildmodell: <b>Qwen-Image lokal</b> — braucht rund 17 GB Grafikspeicher."
@@ -3831,13 +3881,20 @@ async function fdHolen() {
 }
 
 function fdAchsenZeigen() {
+  const ohneBoden = FDFOTOS.length && !FDFOTOS.some(f => f.boden);
   $("fdAchsen").innerHTML = Object.entries(FDKATALOG).map(([feld, werte]) => {
     const w = FDWAHL[feld];
+    // Wie die Achse beim eingestellten Bildmodell wirkt -- in der Cloud
+    // setzt das Programm einiges selbst, anderes wirkt dort kaum.
+    const wirkung = FDWIRKUNG[feld]
+      ? `<div class="hint fdwirkung${feld === "scene" && w.an && ohneBoden ? " dsgrund" : ""}">`
+        + `${esc(FDWIRKUNG[feld])}</div>` : "";
     return `<div class="fdachse">
       <label class="check"><input type="checkbox" ${w.an ? "checked" : ""}
         onchange="FDWAHL['${feld}'].an=this.checked;fdAchsenZeigen();fdPlan()">
         <b>${esc(FDNAMEN[feld] || feld)}</b>
         <span class="hint">${w.an ? `${w.werte.length} von ${werte.length}` : "bleibt wie im Foto"}</span></label>
+      ${w.an ? wirkung : ""}
       ${w.an ? `<div class="fdwerte">
         <a href="#" onclick="fdAlle('${feld}',true);return false">alle</a>
         <a href="#" onclick="fdAlle('${feld}',false);return false">keine</a>
@@ -3925,34 +3982,43 @@ $("fdDatei").onchange = () => {
   $("fdDatei").value = "";
 };
 
+// Je Foto eine kleine Checkliste: was gemalt ist und was daraus folgt.
 function fdFotosZeigen() {
   $("fdFotos").innerHTML = FDFOTOS.map((f, i) => {
     const e = {breite: f.groesse[0], hoehe: f.groesse[1]};
+    const punkt = (an, text) => `<span class="fdpunkt ${an ? "an" : ""}">${an ? "✓" : "–"} ${text}</span>`;
     return `<figure class="dsbild">
       <div class="dsflaeche" onmousedown="fdZiehen(event, ${i})">
         <img src="${f.bild}" draggable="false" alt="">
+        ${f.boden ? `<img class="fdmaske" src="${f.boden}" alt="">` : ""}
         ${f.maske ? `<img class="fdmaske" src="${f.maske}" alt="">` : ""}
         ${dsRahmen(f.box, e, "dsbox dsneu")}
       </div>
       <figcaption>${esc(f.name)} · ${f.groesse[0]}×${f.groesse[1]}<br>
         <a href="#" onclick="fdEditor(${i});return false"><b>⤢ ausmalen</b></a>
-        ${f.maske ? "· Bereich bewahrt" : ""}
-        ${f.maske ? `<a href="#" onclick="FDFOTOS[${i}].maske=null;fdFotosZeigen();return false">Maske weg</a>` : ""}<br>
-        ${f.box ? "Box gesetzt" : f.maske ? "<i>Box kommt aus der Maske</i>"
-                 : "<i>ohne Box — der Erkenner sucht sie</i>"}
-        ${f.box ? `<a href="#" onclick="FDFOTOS[${i}].box=null;fdFotosZeigen();return false">Box weg</a>` : ""}
-        <a href="#" onclick="FDFOTOS.splice(${i},1);fdFotosZeigen();fdPlan();return false">entfernen</a>
+        <a href="#" onclick="FDFOTOS.splice(${i},1);fdFotosZeigen();fdPlan();return false">entfernen</a><br>
+        ${punkt(f.maske, "Objekt gemalt")}
+        ${f.maske ? `<a href="#" onclick="FDFOTOS[${i}].maske=null;fdFotosZeigen();return false">weg</a>` : ""}<br>
+        ${punkt(f.boden, "Boden gemalt")}
+        ${f.boden ? `<a href="#" onclick="FDFOTOS[${i}].boden=null;fdFotosZeigen();return false">weg</a>`
+                  : "<i>(nur für Untergrund)</i>"}<br>
+        ${punkt(f.box || f.maske, f.box ? "Box gezogen" : f.maske ? "Box aus dem Objekt"
+                                         : "keine Box — der Erkenner sucht sie")}
+        ${f.box ? `<a href="#" onclick="FDFOTOS[${i}].box=null;fdFotosZeigen();return false">weg</a>` : ""}
       </figcaption></figure>`;
   }).join("");
+  fdAchsenZeigen();
+  wegZeigen();
 }
 
 function fdEditor(i) {
   const f = FDFOTOS[i];
   editorOeffnen({bild: f.bild, breite: f.groesse[0], hoehe: f.groesse[1],
-    maske: f.maske, box: f.box, modi: ["pinsel", "radierer", "box"],
-    hinweis: "Nur das Objekt ausmalen, das unverändert bleiben soll — nicht das Auto "
-      + "daneben. Strg+Mausrad zoomt. Die Box ist optional: ohne sie gilt die Maske.",
-    fertig: (maske, box) => { f.maske = maske; f.box = box; fdFotosZeigen(); }});
+    maske: f.maske, boden: f.boden, box: f.box, modi: ["pinsel", "boden", "radierer", "box"],
+    hinweis: "🖌 Objekt: nur die Kupplung, ganz — nicht das Auto daneben. "
+      + "🟫 Boden: die freie Bodenfläche, grob mit großem Pinsel (nur für Untergrund). "
+      + "Strg+Mausrad zoomt. Der Radierer nimmt beides weg.",
+    fertig: (maske, box, boden) => { f.maske = maske; f.box = box; f.boden = boden; fdFotosZeigen(); }});
 }
 
 function fdZiehen(ev, i) {
@@ -4000,7 +4066,8 @@ async function fdStarten() {
     steps: parseInt($("fdSchritte").value, 10) || 30,
     base: parseInt($("fdBase").value, 10) || 1024,
     original: $("fdOriginal").checked, labeln: $("fdLabeln").checked,
-    bewahren: $("fdBewahren").checked, licht: $("fdLicht").checked});
+    bewahren: $("fdBewahren").checked, licht: $("fdLicht").checked,
+    vorbehandeln: $("fdVorbehandeln").checked});
   if (!res) { if (!laeuftSchon) buttonState("idle"); return; }
   say(`Eingereiht: ${res.bilder} Varianten aus ${FDFOTOS.length} Foto(s) …`, "ok");
   if (!laeuftSchon) paintSeries([], Math.min(res.bilder, 60), 1);
@@ -4019,18 +4086,22 @@ function editorOeffnen(o) {
   const groesse = Math.max(3, Math.round(Math.max(o.breite, o.hoehe) / 120));
   ED = Object.assign({zoom: 1, pinsel: groesse, gemalt: !!o.maske}, o,
                      {box: o.box ? o.box.slice() : null, modus: o.modi[0]});
-  const c = $("edMaske");
-  c.width = o.breite; c.height = o.hoehe;
-  const ctx = c.getContext("2d");
-  ctx.clearRect(0, 0, c.width, c.height);
-  if (o.maske) {
-    const m = new Image();
-    m.onload = () => ctx.drawImage(m, 0, 0, o.breite, o.hoehe);
-    m.src = o.maske;
-  }
+  // Zwei Malschichten: das Objekt (gruen) und der Boden (orange).
+  [["edMaske", o.maske], ["edBoden", o.boden]].forEach(([id, vorher]) => {
+    const c = $(id);
+    c.width = o.breite; c.height = o.hoehe;
+    const ctx = c.getContext("2d");
+    ctx.clearRect(0, 0, c.width, c.height);
+    if (vorher) {
+      const m = new Image();
+      m.onload = () => ctx.drawImage(m, 0, 0, o.breite, o.hoehe);
+      m.src = vorher;
+    }
+  });
   ["pinsel", "radierer"].forEach(m =>
     $(m === "pinsel" ? "edPinsel" : "edRadierer").style.display = o.modi.includes(m) ? "" : "none");
   $("edBoxModus").style.display = o.modi.includes("box") ? "" : "none";
+  $("edBodenModus").style.display = o.modi.includes("boden") ? "" : "none";
   $("edGroesseZeile").style.display = o.modi.includes("pinsel") ? "" : "none";
   $("edLeeren").style.display = o.modi.includes("pinsel") ? "" : "none";
   $("edGroesse").max = Math.max(60, Math.round(Math.max(o.breite, o.hoehe) / 8));
@@ -4090,15 +4161,20 @@ function editorPunkt(ev) {
 }
 
 function editorStrich(von, nach) {
-  const ctx = $("edMaske").getContext("2d");
-  ctx.globalCompositeOperation = ED.modus === "radierer" ? "destination-out" : "source-over";
-  ctx.strokeStyle = ctx.fillStyle = "#00ff66";
-  ctx.lineWidth = ED.pinsel;
-  ctx.lineCap = ctx.lineJoin = "round";
-  ctx.beginPath();
-  ctx.moveTo(von[0], von[1]);
-  ctx.lineTo(nach[0] + 0.01, nach[1]);
-  ctx.stroke();
+  // Der Radierer wirkt auf beide Schichten, die Pinsel je auf ihre.
+  const schichten = ED.modus === "radierer" ? ["edMaske", "edBoden"]
+                  : [ED.modus === "boden" ? "edBoden" : "edMaske"];
+  schichten.forEach(id => {
+    const ctx = $(id).getContext("2d");
+    ctx.globalCompositeOperation = ED.modus === "radierer" ? "destination-out" : "source-over";
+    ctx.strokeStyle = ctx.fillStyle = ED.modus === "boden" ? "#ff9900" : "#00ff66";
+    ctx.lineWidth = ED.pinsel;
+    ctx.lineCap = ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(von[0], von[1]);
+    ctx.lineTo(nach[0] + 0.01, nach[1]);
+    ctx.stroke();
+  });
   if (ED.modus === "pinsel") ED.gemalt = true;
 }
 
@@ -4151,14 +4227,17 @@ $("edFlaeche").addEventListener("wheel", ev => {
 $("edPinsel").onclick = () => editorModus("pinsel");
 $("edRadierer").onclick = () => editorModus("radierer");
 $("edBoxModus").onclick = () => editorModus("box");
+$("edBodenModus").onclick = () => editorModus("boden");
 $("edGroesse").oninput = editorGroesse;
 $("edGroesser").onclick = () => editorZoom(ED.zoom * 1.25);
 $("edKleiner").onclick = () => editorZoom(ED.zoom * 0.8);
 $("edEinpassen").onclick = editorEinpassen;
 $("edEins").onclick = () => editorZoom(1);
 $("edLeeren").onclick = () => {
-  const c = $("edMaske");
-  c.getContext("2d").clearRect(0, 0, c.width, c.height);
+  ["edMaske", "edBoden"].forEach(id => {
+    const c = $(id);
+    c.getContext("2d").clearRect(0, 0, c.width, c.height);
+  });
   ED.gemalt = false;
 };
 $("edBoxWeg").onclick = () => { ED.box = null; editorBoxZeigen(); };
@@ -4169,11 +4248,11 @@ document.addEventListener("keydown", ev => {
 
 // Ist ueberhaupt etwas gemalt? Auf einer kleinen Kopie nachsehen -- ein
 // Handyfoto hat 12 Millionen Pixel, die muss man dafuer nicht alle lesen.
-function editorMaskeLeer() {
+function editorMaskeLeer(id = "edMaske") {
   const k = document.createElement("canvas");
   k.width = 256; k.height = Math.max(1, Math.round(256 * ED.hoehe / ED.breite));
   const ctx = k.getContext("2d");
-  ctx.drawImage($("edMaske"), 0, 0, k.width, k.height);
+  ctx.drawImage($(id), 0, 0, k.width, k.height);
   const d = ctx.getImageData(0, 0, k.width, k.height).data;
   for (let i = 3; i < d.length; i += 4) if (d[i] > 20) return false;
   return true;
@@ -4182,10 +4261,12 @@ function editorMaskeLeer() {
 $("edFertig").onclick = () => {
   const maske = ED.modi.includes("pinsel") && !editorMaskeLeer()
     ? $("edMaske").toDataURL("image/png") : null;
+  const boden = ED.modi.includes("boden") && !editorMaskeLeer("edBoden")
+    ? $("edBoden").toDataURL("image/png") : null;
   const fertig = ED.fertig, box = ED.box;
   $("edEditor").style.display = "none";
   ED = null;
-  fertig(maske, box);
+  fertig(maske, box, boden);
 };
 
 // ---------- Cloud-Modelle ----------
@@ -4413,6 +4494,7 @@ function poll() {
     // nicht, er muss eigens nachgeladen werden.
     if (mode === "seiten") seitenHolen();
     if (mode === "training") detHolen();
+    wegZeigen();
     loadGallery();
   }, 900);
 }

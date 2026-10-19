@@ -126,7 +126,6 @@
       <button id="tab-gruppe">Gruppe</button>
       <button id="tab-person">Rundum</button>
       <button id="tab-varianten">Varianten</button>
-      <button id="tab-fotodaten">Fotodaten</button>
       <button id="tab-retusche">Retusche</button>
       <button id="tab-demo">Ablauf</button>
       <button id="tab-bausteine">Bausteine</button>
@@ -134,8 +133,19 @@
       <button id="tab-geschichte">Geschichte</button>
       <button id="tab-katalog">Katalog</button>
       <button id="tab-seiten">Sechs Seiten</button>
-      <button id="tab-datensatz">Datensatz</button>
-      <button id="tab-training">Training</button>
+    </div>
+    <!-- Der Weg zum eigenen Detektor, der Reihe nach. Die Nummern sind die
+         Reihenfolge; die Zeile darunter sagt, wo man steht und was als
+         Naechstes kommt. -->
+    <div class="weg">
+      <div class="wegkopf">Eigener Detektor — der Reihe nach</div>
+      <div class="tabs tabsweg">
+        <button id="tab-anleitung">? Anleitung</button>
+        <button id="tab-fotodaten">1 · Fotodaten</button>
+        <button id="tab-datensatz">2 · Prüfen</button>
+        <button id="tab-training">3 · Trainieren</button>
+      </div>
+      <p class="hint" id="wegStand" style="display:none"></p>
     </div>
 
     <fieldset id="bausteinBox" style="display:none">
@@ -537,32 +547,95 @@
         <b>Feineinstellung</b> unten.</p>
     </fieldset>
 
+    <fieldset id="anleitungBox" style="display:none">
+      <legend>Anleitung: Trainingsdaten erzeugen und Detektor trainieren</legend>
+      <p class="hint">Ziel: ein Detektor, der dein Objekt — etwa eine
+        Anhängerkupplung — in echten Fotos findet. Der Weg hat vier Schritte,
+        jeder in seinem Reiter. Alles landet im <b>Projekt</b> oben in der
+        Kopfzeile; für einen neuen Detektor dort <b>+ neu</b>.</p>
+
+      <h3 class="stufe">1 · Fotodaten erzeugen
+        <a href="#" data-geh="fotodaten">öffnen →</a></h3>
+      <ol class="anleitung">
+        <li><b>Was soll erkannt werden:</b> Klasse (<code>anhaengerkupplung</code>),
+          Suchbegriff auf Englisch (<code>tow hitch</code>), Motivart.</li>
+        <li><b>Fotos laden</b> — mehrere echte Fotos aus verschiedenen Winkeln
+          sind mehr wert als viele Varianten aus einem.</li>
+        <li>Je Foto <b>⤢ ausmalen</b>:
+          <ul>
+            <li><b>🖌 Objekt</b> — nur die Kupplung, ganz, auch die Kugel.
+              Genau diese Pixel kommen in jede Variante zurück, und die Box
+              ergibt sich daraus.</li>
+            <li><b>🟫 Boden</b> — die freie Bodenfläche, grob mit großem
+              Pinsel. Nur nötig für die Achse <i>Untergrund</i>.</li>
+          </ul></li>
+        <li><b>Was sich ändern darf:</b> Farbe, Untergrund, Kamera, Licht
+          anhaken und die Werte wählen.</li>
+        <li><b>Wie viele:</b> <i>einzeln und kombiniert</i> ist ein guter
+          Anfang. Die Zahl darunter sagt, wie viele Bilder entstehen — in der
+          Cloud ist das auch die Zahl der bezahlten Bilder.</li>
+        <li>Großer Knopf <b>Fotodaten erzeugen</b>. Fenster offen lassen, bis
+          die Statuszeile „Datensatz: … aufgenommen“ meldet — erst dann
+          sind die Boxen gesetzt.</li>
+      </ol>
+
+      <h3 class="stufe">2 · Prüfen
+        <a href="#" data-geh="datensatz">öffnen →</a></h3>
+      <ol class="anleitung">
+        <li><i>Zeigen: zu prüfen</i>. Rote Box = geht ins Label.</li>
+        <li>Stimmt sie: <b>✓ aufnehmen</b>. Falsch: neue Box ziehen (oder
+          <b>⤢ groß</b>), dann ✓ aufnehmen. Unbrauchbar: <b>✗ verwerfen</b>.</li>
+        <li>Stichproben auch unter <i>aufgenommen</i> ansehen.</li>
+        <li>Optional unten <b>Vervielfältigen</b>: aus jedem geprüften Bild
+          weitere, ohne neue Box (klassisch: sehr schnell, nur CPU).</li>
+      </ol>
+      <p class="hint">Nur aufgenommene Bilder gehen ins Training. Für einen
+        ersten Versuch reichen 50–100, gut wird es ab einigen hundert.</p>
+
+      <h3 class="stufe">3 · Trainieren
+        <a href="#" data-geh="training">öffnen →</a></h3>
+      <ol class="anleitung">
+        <li>Modell <b>dfine-nano</b> (frei weitergebbar) oder <b>yolo26n</b>.</li>
+        <li>Epochen 80, Bildgröße 640 — <b>960</b>, wenn das Objekt klein im
+          Bild ist. Validierung 20 %.</li>
+        <li>Großer Knopf <b>Detektor trainieren</b>. Die Statuszeile zeigt
+          Epoche und mAP50; 1,0 hieße alles gefunden.</li>
+      </ol>
+
+      <h3 class="stufe">4 · Ausprobieren
+        <a href="#" data-geh="training">öffnen →</a></h3>
+      <ol class="anleitung">
+        <li>Im Reiter Trainieren unten bei <b>Ausprobieren</b> den Lauf
+          wählen, Mindestsicherheit 0,25.</li>
+        <li>Ein <b>echtes</b> Foto hochladen, das nicht im Training war.
+          Findet er wenig: mehr echte Fotos, mehr Epochen, Bildgröße 960.</li>
+      </ol>
+
+      <h3 class="stufe">Gut zu wissen</h3>
+      <ul class="anleitung">
+        <li><b>Cloud-Bildmodell</b> (Z Image Turbo): es malt das Foto nur
+          nach. Farbe, Kamera, Boden und Licht setzt das Programm deshalb
+          vorher selbst, das Modell gleicht nur an. Ist ein Objekt gemalt,
+          rechnet es mit wenig Stärke, damit das Objekt an seinem Platz
+          bleibt.</li>
+        <li><b>Lokal</b> (Qwen-Image, große Grafikkarte): mehr Vielfalt, das
+          Einsetzen gelingt besser.</li>
+        <li>Training auf einem anderen Rechner: den Ordner
+          <code>projekte\&lt;Projekt&gt;</code> kopieren, dort Schritt 3.</li>
+        <li>Die ausführliche Anleitung steht in <code>ANLEITUNG.md</code>,
+          Abschnitt 7.</li>
+      </ul>
+    </fieldset>
+
     <fieldset id="fotodatenBox" style="display:none">
-      <legend>Trainingsdaten aus echten Fotos</legend>
-      <p class="hint">Eigene Fotos hochladen — etwa ein Auto mit
-        Anhängerkupplung. Aus jedem entstehen Varianten mit anderer
-        <b>Farbe</b>, anderem <b>Untergrund</b>, anderer <b>Kameraposition</b>
-        und anderem <b>Licht</b>, einzeln und kombiniert. Danach bekommt jedes
-        Bild seine Bounding Box (Qwen3-VL + Grounding DINO) und landet mit dem
-        Original im <b>Datensatz</b> — als YOLO, COCO und
-        <code>attribute.csv</code>.</p>
+      <legend>1 · Trainingsdaten aus echten Fotos</legend>
+      <p class="hint">Aus jedem Foto entstehen Varianten mit anderer Farbe,
+        anderem Untergrund, anderer Kamera und anderem Licht. Jedes Bild
+        bekommt seine Box und landet mit dem Original im Datensatz.
+        Von oben nach unten ausfüllen.</p>
       <p class="hint" id="fdBildmodell"></p>
 
-      <h3 class="stufe">1 · Fotos</h3>
-      <input type="file" id="fdDatei" accept="image/*" multiple>
-      <p class="hint"><b>Box von Hand (empfohlen):</b> mit der Maus über das
-        Objekt ziehen. Ein Original mit gezogener Box wird sofort aufgenommen
-        und dient den Varianten als Bezug. Ohne Box sucht sie der Erkenner.</p>
-      <div id="fdFotos" class="dsgitter"></div>
-
-      <p class="hint"><b>Was unverändert bleiben soll, ausmalen:</b> über
-        <b>⤢ ausmalen</b> öffnet sich das Foto groß. Mit dem Pinsel nur die
-        Kupplung bemalen — nicht das Auto daneben, das soll sich ja ändern.
-        Nach dem Erzeugen werden genau diese Pixel aus dem Original in jede
-        Variante zurückgesetzt, ans neue Licht angeglichen. Die Box ergibt
-        sich dann von selbst aus der Maske.</p>
-
-      <h3 class="stufe">2 · Was gesucht wird</h3>
+      <h3 class="stufe">1 · Was soll erkannt werden</h3>
       <div class="axis">
         <div>
           <label for="fdKlasse">Klasse (klein, ohne Leerzeichen)</label>
@@ -573,30 +646,38 @@
           <input id="fdSuche" value="tow hitch">
         </div>
         <div>
-          <label for="fdMotiv">Motivart</label>
+          <label for="fdMotiv">Woran es sitzt (Motivart)</label>
           <select id="fdMotiv">
             <option value="fahrzeug">Fahrzeug</option>
             <option value="gegenstand">Gegenstand</option>
             <option value="person">Person</option>
           </select>
         </div>
-        <div>
-          <label for="fdZiel">Was umgefärbt wird (Farbachse)</label>
-          <input id="fdZiel" value="the car body">
-        </div>
+        <div></div>
       </div>
-      <label for="fdKeep">Was unverändert bleiben muss</label>
+      <label for="fdKeep">Das Objekt in einem Satz (englisch) — bleibt unverändert</label>
       <input id="fdKeep" value="The black tow hitch with the ball neck and its socket">
 
-      <h3 class="stufe">3 · Achsen</h3>
-      <p class="hint">Haken setzen, welche Achsen sich ändern dürfen, und je
-        Achse die Werte wählen. Nicht gewählte Achsen bleiben wie im Foto.</p>
+      <h3 class="stufe">2 · Fotos laden und ausmalen</h3>
+      <input type="file" id="fdDatei" accept="image/*" multiple>
+      <p class="hint">Je Foto <b>⤢ ausmalen</b>: mit <b>🖌 Objekt</b> nur die
+        Kupplung bemalen — nicht das Auto daneben, das soll sich ja ändern.
+        Mit <b>🟫 Boden</b> die freie Bodenfläche, wenn sich der Untergrund
+        ändern soll. Die Box ergibt sich aus dem Objekt; ziehen musst du sie
+        nur, wenn du nicht malst.</p>
+      <div id="fdFotos" class="dsgitter"></div>
+
+      <h3 class="stufe">3 · Was sich ändern darf</h3>
+      <label for="fdZiel">Was umgefärbt wird (für die Farbe, englisch)</label>
+      <input id="fdZiel" value="the car body">
+      <p class="hint">Achse anhaken und ihre Werte wählen. Nicht angehakte
+        Achsen bleiben wie im Foto.</p>
       <div id="fdAchsen"></div>
 
-      <h3 class="stufe">4 · Plan</h3>
+      <h3 class="stufe">4 · Wie viele</h3>
       <div class="axis">
         <div>
-          <label for="fdArt">Varianten</label>
+          <label for="fdArt">Plan</label>
           <select id="fdArt">
             <option value="beides">einzeln und kombiniert</option>
             <option value="einzeln">einzeln — jede Achse für sich</option>
@@ -608,30 +689,39 @@
           <label for="fdAnzahl">Kombinierte je Foto</label>
           <input type="number" id="fdAnzahl" value="12" min="1" max="500">
         </div>
-        <div>
-          <label for="fdSchritte">Schritte (nur lokal)</label>
-          <input type="number" id="fdSchritte" value="30" min="8" max="60">
-        </div>
-        <div>
-          <label for="fdBase">Kantenlänge</label>
-          <select id="fdBase">
-            <option value="768">768 px</option>
-            <option value="1024" selected>1024 px</option>
-          </select>
-        </div>
       </div>
-      <label class="check"><input type="checkbox" id="fdOriginal" checked>
-        Originalfotos mit in den Datensatz</label>
-      <label class="check"><input type="checkbox" id="fdLabeln" checked>
-        Bounding Boxes gleich setzen</label>
-      <label class="check"><input type="checkbox" id="fdBewahren" checked>
-        Gemalten Bereich aus dem Original einsetzen</label>
-      <label class="check"><input type="checkbox" id="fdLicht" checked>
-        … dabei ans neue Licht angleichen</label>
       <p class="hint" id="fdVorschau"></p>
-      <p class="hint">Gestartet wird mit dem großen Knopf unten. Danach im
-        Reiter <b>Datensatz</b> die Prüfliste ansehen, im Reiter
-        <b>Training</b> D-FINE oder YOLO26 trainieren.</p>
+      <details class="fdfein">
+        <summary>Feineinstellung</summary>
+        <div class="axis">
+          <div>
+            <label for="fdSchritte">Schritte (nur lokal)</label>
+            <input type="number" id="fdSchritte" value="30" min="8" max="60">
+          </div>
+          <div>
+            <label for="fdBase">Kantenlänge</label>
+            <select id="fdBase">
+              <option value="768">768 px</option>
+              <option value="1024" selected>1024 px</option>
+            </select>
+          </div>
+        </div>
+        <label class="check"><input type="checkbox" id="fdOriginal" checked>
+          Originalfotos mit in den Datensatz</label>
+        <label class="check"><input type="checkbox" id="fdLabeln" checked>
+          Bounding Boxes gleich setzen</label>
+        <label class="check"><input type="checkbox" id="fdBewahren" checked>
+          Gemaltes Objekt aus dem Original einsetzen</label>
+        <label class="check"><input type="checkbox" id="fdLicht" checked>
+          … dabei ans neue Licht angleichen</label>
+        <label class="check"><input type="checkbox" id="fdVorbehandeln" checked>
+          Cloud: Kamera, Farbe, Boden und Licht vorher selbst setzen</label>
+      </details>
+
+      <h3 class="stufe">5 · Erzeugen</h3>
+      <p class="hint">Mit dem großen Knopf unten. Fenster offen lassen, bis die
+        Statuszeile „Datensatz: … aufgenommen“ meldet. Dann weiter mit
+        <a href="#" data-geh="datensatz"><b>2 · Prüfen →</b></a></p>
     </fieldset>
 
 
@@ -640,7 +730,8 @@
     <div id="edEditor" class="ededitor" style="display:none" role="dialog" aria-label="Bild bearbeiten">
       <div class="edleiste">
         <span class="edgruppe">
-          <button type="button" id="edPinsel" data-modus="pinsel" title="Bereich malen, der unverändert bleibt">🖌 Bewahren malen</button>
+          <button type="button" id="edPinsel" data-modus="pinsel" title="Das Objekt malen, das unverändert bleibt">🖌 Objekt</button>
+          <button type="button" id="edBodenModus" data-modus="boden" title="Die Bodenfläche malen, die einen neuen Untergrund bekommt">🟫 Boden</button>
           <button type="button" id="edRadierer" data-modus="radierer" title="Gemaltes wegnehmen">⌫ Radierer</button>
           <button type="button" id="edBoxModus" data-modus="box" title="Box um das Objekt ziehen">▭ Box ziehen</button>
         </span>
@@ -655,7 +746,7 @@
           <button type="button" id="edEins">1:1</button>
         </span>
         <span class="edgruppe">
-          <button type="button" id="edLeeren">Maske leeren</button>
+          <button type="button" id="edLeeren">Gemaltes leeren</button>
           <button type="button" id="edBoxWeg">Box weg</button>
         </span>
         <span class="edgruppe edrechts">
@@ -668,6 +759,7 @@
         <div id="edInnen" class="edinnen">
           <img id="edBild" alt="" draggable="false">
           <canvas id="edMaske"></canvas>
+          <canvas id="edBoden"></canvas>
           <div id="edBox" class="dsbox dsneu" style="display:none"></div>
           <div id="edZeiger" class="edzeiger"></div>
         </div>
