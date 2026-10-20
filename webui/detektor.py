@@ -127,6 +127,22 @@ def aufteilen(projekt: str, val_anteil: float) -> dict:
             val_gruppen = {min(gruppen, key=_wert)}
         if val_gruppen == set(gruppen):
             val_gruppen.discard(max(gruppen, key=_wert))
+        # Jedes zusammengefuehrte Projekt -- eine Ansicht, etwa von der
+        # Seite -- behaelt mindestens eine Gruppe im Training. Gemessen: das
+        # Video von der Seite war eine einzige Gruppe, lag ganz in val, und
+        # das Modell hatte nie eine Seitenansicht gesehen.
+        je_projekt = {}
+        for e in eintraege:
+            je_projekt.setdefault(e.get("aus_projekt") or "", set()).add(_gruppe(e["datei"]))
+        allein = []
+        for quelle, eigene in sorted(je_projekt.items()):
+            if len(je_projekt) > 1 and eigene <= val_gruppen:
+                val_gruppen.discard(max(eigene, key=_wert))
+                if not eigene & val_gruppen:
+                    allein.append(quelle)
+        if allein:
+            hinweis = ("Nur im Training, nicht geprüft (je nur eine Gruppe): "
+                       + ", ".join(allein))
         val = [e for e in eintraege if _gruppe(e["datei"]) in val_gruppen]
     else:
         val = [e for e in eintraege if _wert(e["datei"]) < val_anteil] or eintraege[:1]
