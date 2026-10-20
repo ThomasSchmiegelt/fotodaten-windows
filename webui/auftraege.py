@@ -618,6 +618,9 @@ def run_fotodaten(params: dict) -> None:
             # neue Sorte hinein (vorbehandeln.boden).
             boden = fotodaten.maske_lesen(decode(foto["boden"]), bild.size) \
                 if foto.get("boden") else None
+            # Der gemalte Lack: ihn faerbt die Achse Lackfarbe um, auch wenn
+            # das Auto weiss, schwarz oder silber ist (vorbehandeln.farbe).
+            lack = fotodaten.maske_lesen(decode(foto["lack"]), bild.size)                 if foto.get("lack") else None
             # Die vier Ecken des Kennzeichens: dort kommt in jedes Bild ein
             # neues, zufaelliges (kennzeichen.py).
             ecken = fotodaten.ecken_umrechnen(foto.get("kennzeichen"), tuple(anzeige), bild.size) \
@@ -648,14 +651,14 @@ def run_fotodaten(params: dict) -> None:
             vorrat = {}
 
             def vorbereitet(achsen, _bild=bild, _maske=maske, _boden=boden,
-                            _ecken=ecken, _vorrat=vorrat):
+                            _ecken=ecken, _lack=lack, _vorrat=vorrat):
                 wahl = {k: achsen.get(k) for k in ("angle", "paint", "scene", "light")}
                 schluessel = tuple(wahl.values())
                 if schluessel not in _vorrat:
                     if len(_vorrat) > 3:
                         _vorrat.clear()
                     _vorrat[schluessel] = vorbehandeln.anwenden(
-                        _bild, wahl, _maske, _boden, untergrund, _ecken)
+                        _bild, wahl, _maske, _boden, untergrund, _ecken, _lack)
                 return _vorrat[schluessel]
 
             def on_image(meta, image, _kind=kind, _liste=entstanden, _maske=maske,

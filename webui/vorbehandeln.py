@@ -14,7 +14,8 @@ Foto:
 
     kamera   perspektivisch verzogen, beschnitten oder gekippt. Dieselbe
              Abbildung gilt fuer Maske und Boden, die Box wandert also exakt mit.
-    farbe    die vorherrschende bunte Flaeche (die Karosserie) im Zielton
+    farbe    die vorherrschende bunte Flaeche (die Karosserie) im Zielton,
+             oder die gemalte Lackflaeche -- die braucht ein unbuntes Auto
     boden    die gemalte Bodenflaeche mit einem Bild des Untergrunds
     licht    Farbton, Kontrast und Lichtverlauf, Rueckleuchten bleiben hell
 
@@ -161,12 +162,44 @@ FARBTOENE = {
 }
 # Mindestanteil der vorherrschenden bunten Farbe am Bild. Darunter ist die
 # Karosserie unbunt (weiss, schwarz, silber) und laesst sich am Farbton nicht
-# finden -- dann bleibt das Foto, wie es ist.
+# finden -- dann bleibt das Foto, wie es ist, ausser der Lack ist gemalt.
 FARBE_ANTEIL = 0.04
+# Fuer die gemalte Lackflaeche: der Zielton als feste Farbe, aus derselben
+# Tabelle -- Saettigung und Helligkeit eines mittleren Lacks mal den Faktoren.
+LACK_SATT, LACK_HELL = 230, 200
 
 
-def farbe(bild: Image.Image, wahl: str | None) -> Image.Image:
-    """Die vorherrschende bunte Flaeche des Fotos in `wahl` umfaerben.
+def _lack(bild: Image.Image, flaeche: Image.Image, wahl: str) -> Image.Image:
+    """Die gemalte Lackflaeche in `wahl`, gleich welche Farbe sie hatte.
+
+    Ein silbernes Auto hat keinen Farbton, den man drehen koennte. Deshalb
+    wird hier nur die Helligkeit des Fotos behalten -- Woelbung, Schatten,
+    Tropfen -- und mit dem Zielton multipliziert. Was heller ist als der
+    Lack im Mittel (Spiegelungen), laeuft gegen Weiss und bleibt Glanz.
+    """
+    ton, f_satt, f_hell, plus = FARBTOENE[wahl]
+    satt = 0 if ton is None else min(255, LACK_SATT * f_satt)
+    hell = min(255, LACK_HELL * f_hell + plus)
+    grund = np.asarray(Image.new("HSV", (1, 1), (round((ton or 0) * 255 / 360),
+                                                 round(satt), round(hell))).convert("RGB"),
+                       np.float32)[0, 0]
+    m = np.asarray(flaeche.convert("L"), np.float32) / 255
+    alt = np.asarray(bild, np.float32)
+    lum = _hell(alt)
+    mittel = float(np.median(lum[m > 0.5])) if (m > 0.5).any() else 128.0
+    rel = (lum / max(mittel, 1.0))[..., None]
+    neu = np.where(rel <= 1, grund * rel,
+                   grund + (255 - grund) * np.clip(rel - 1, 0, 1))
+    b, h = bild.size
+    weich = np.asarray(flaeche.convert("L").filter(
+        ImageFilter.GaussianBlur(max(1, round(0.002 * max(b, h))))), np.float32)[..., None] / 255
+    return Image.fromarray(np.clip(alt * (1 - weich) + neu * weich, 0, 255).astype(np.uint8))
+
+
+def farbe(bild: Image.Image, wahl: str | None,
+          flaeche: Image.Image | None = None) -> Image.Image:
+    """Die vorherrschende bunte Flaeche des Fotos in `wahl` umfaerben --
+    oder die gemalte Lackflaeche `flaeche`, wenn es sie gibt.
 
     Der bewahrte Bereich wird mit umgefaerbt -- `fotodaten.bewahren` setzt
     ihn danach aus dieser Vorlage ein, und so hat sein Rand schon die neue
@@ -174,8 +207,10 @@ def farbe(bild: Image.Image, wahl: str | None) -> Image.Image:
     """
     if wahl not in FARBTOENE:
         return bild
-    ton, f_satt, f_hell, plus = FARBTOENE[wahl]
     bild = bild.convert("RGB")
+    if flaeche is not None and flaeche.getbbox():
+        return _lack(bild, flaeche, wahl)
+    ton, f_satt, f_hell, plus = FARBTOENE[wahl]
     hsv = np.asarray(bild.convert("HSV")).astype(np.float32)
     h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
     bunt = (s > 90) & (v > 40)
@@ -366,23 +401,24 @@ DUNKEL = {"blau", "neon", "gegenlicht"}
 
 def anwenden(bild: Image.Image, belegung: dict, maske: Image.Image | None = None,
              bodenflaeche: Image.Image | None = None, untergrund: dict | None = None,
-             ecken: list | None = None):
+             ecken: list | None = None, lackflaeche: Image.Image | None = None):
     """Foto und Maske fuer eine Belegung (Achse -> Schluessel).
 
     Zurueck (Vorlage, Maske, Ecken): Maske und die Ecken des Kennzeichens
     haben die Kameraposition mitgemacht.
     `untergrund` ist Schluessel -> Text der Untergrundsorten; ohne gemalte
-    Bodenflaeche bleibt der Boden, wie er ist.
+    Bodenflaeche bleibt der Boden, wie er ist. Ohne gemalte Lackflaeche sucht
+    `farbe` die bunteste Flaeche -- ein unbuntes Auto bleibt dann, wie es ist.
     """
     mitte = None
     if maske is not None and maske.getbbox():
         x1, y1, x2, y2 = maske.getbbox()
         mitte = ((x1 + x2) / 2, (y1 + y2) / 2)
     groesse = bild.size
-    bild, maske, bodenflaeche = kamera([bild.convert("RGB"), maske, bodenflaeche],
-                                       belegung.get("angle"), mitte)
+    bild, maske, bodenflaeche, lackflaeche = kamera(
+        [bild.convert("RGB"), maske, bodenflaeche, lackflaeche], belegung.get("angle"), mitte)
     ecken = kamera_ecken(groesse, belegung.get("angle"), mitte, ecken)
-    bild = farbe(bild, belegung.get("paint"))
+    bild = farbe(bild, belegung.get("paint"), lackflaeche)
     sorte = belegung.get("scene")
     if bodenflaeche is not None and untergrund and sorte in untergrund:
         bild = boden(bild, bodenflaeche, boden_bild(sorte, untergrund[sorte]))

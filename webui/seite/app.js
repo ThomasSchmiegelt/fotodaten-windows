@@ -3959,12 +3959,13 @@ async function fdHolen() {
 
 function fdAchsenZeigen() {
   const ohneBoden = FDFOTOS.length && !FDFOTOS.some(f => f.boden);
+  const ohneLack = FDFOTOS.length && !FDFOTOS.some(f => f.lack);
   $("fdAchsen").innerHTML = Object.entries(FDKATALOG).map(([feld, werte]) => {
     const w = FDWAHL[feld];
     // Wie die Achse beim eingestellten Bildmodell wirkt -- in der Cloud
     // setzt das Programm einiges selbst, anderes wirkt dort kaum.
     const wirkung = FDWIRKUNG[feld]
-      ? `<div class="hint fdwirkung${feld === "scene" && w.an && ohneBoden ? " dsgrund" : ""}">`
+      ? `<div class="hint fdwirkung${w.an && ((feld === "scene" && ohneBoden) || (feld === "paint" && ohneLack)) ? " dsgrund" : ""}">`
         + `${esc(FDWIRKUNG[feld])}</div>` : "";
     return `<div class="fdachse">
       <label class="check"><input type="checkbox" ${w.an ? "checked" : ""}
@@ -4068,6 +4069,7 @@ function fdFotosZeigen() {
       <div class="dsflaeche" onmousedown="fdZiehen(event, ${i})">
         <img src="${f.bild}" draggable="false" alt="">
         ${f.boden ? `<img class="fdmaske" src="${f.boden}" alt="">` : ""}
+        ${f.lack ? `<img class="fdmaske" src="${f.lack}" alt="">` : ""}
         ${f.maske ? `<img class="fdmaske" src="${f.maske}" alt="">` : ""}
         ${f.kennzeichen ? `<svg class="edecken fdecken" viewBox="0 0 ${f.groesse[0]} ${f.groesse[1]}"
           preserveAspectRatio="none"><polygon points="${f.kennzeichen.map(p => p.join(",")).join(" ")}"/></svg>` : ""}
@@ -4082,6 +4084,9 @@ function fdFotosZeigen() {
         ${punkt(f.boden, "Boden gemalt")}
         ${f.boden ? `<a href="#" onclick="FDFOTOS[${i}].boden=null;fdFotosZeigen();return false">weg</a>`
                   : "<i>(nur für Untergrund)</i>"}<br>
+        ${punkt(f.lack, "Lack gemalt")}
+        ${f.lack ? `<a href="#" onclick="FDFOTOS[${i}].lack=null;fdFotosZeigen();return false">weg</a>`
+                 : "<i>(für Lackfarbe bei weiß, schwarz, silber)</i>"}<br>
         ${punkt(f.kennzeichen, "Kennzeichen markiert")}
         ${f.kennzeichen ? `<a href="#" onclick="fdKennzeichenProbe(${i});return false">Beispiel</a>
           ${f.probe ? `<a href="#" onclick="FDFOTOS[${i}].probe=null;fdFotosZeigen();return false">Beispiel weg</a>` : ""}
@@ -4099,14 +4104,15 @@ function fdFotosZeigen() {
 function fdEditor(i) {
   const f = FDFOTOS[i];
   editorOeffnen({bild: f.bild, breite: f.groesse[0], hoehe: f.groesse[1],
-    maske: f.maske, boden: f.boden, box: f.box, ecken: f.kennzeichen,
-    modi: ["pinsel", "boden", "kennzeichen", "radierer", "box"],
+    maske: f.maske, boden: f.boden, lack: f.lack, box: f.box, ecken: f.kennzeichen,
+    modi: ["pinsel", "boden", "lack", "kennzeichen", "radierer", "box"],
     hinweis: "🖌 Objekt: nur die Kupplung, ganz — nicht das Auto daneben. "
       + "🟫 Boden: die freie Bodenfläche, grob mit großem Pinsel (nur für Untergrund). "
+      + "🎨 Lack: die lackierte Karosserie, ohne Scheiben, Lichter und Boden (für Lackfarbe). "
       + "▱ Kennzeichen: die vier Ecken des Schilds anklicken. "
       + "Strg+Mausrad zoomt. Der Radierer nimmt Gemaltes weg.",
-    fertig: (maske, box, boden, ecken) => {
-      f.maske = maske; f.box = box; f.boden = boden;
+    fertig: (maske, box, boden, ecken, lack) => {
+      f.maske = maske; f.box = box; f.boden = boden; f.lack = lack;
       if (JSON.stringify(ecken) !== JSON.stringify(f.kennzeichen)) f.probe = null;
       f.kennzeichen = ecken;
       fdFotosZeigen();
@@ -4191,8 +4197,8 @@ function editorOeffnen(o) {
   const groesse = Math.max(3, Math.round(Math.max(o.breite, o.hoehe) / 120));
   ED = Object.assign({zoom: 1, pinsel: groesse, gemalt: !!o.maske}, o,
                      {box: o.box ? o.box.slice() : null, modus: o.modi[0]});
-  // Zwei Malschichten: das Objekt (gruen) und der Boden (orange).
-  [["edMaske", o.maske], ["edBoden", o.boden]].forEach(([id, vorher]) => {
+  // Drei Malschichten: das Objekt (gruen), der Boden (orange), der Lack (blau).
+  [["edMaske", o.maske], ["edBoden", o.boden], ["edLack", o.lack]].forEach(([id, vorher]) => {
     const c = $(id);
     c.width = o.breite; c.height = o.hoehe;
     const ctx = c.getContext("2d");
@@ -4207,6 +4213,7 @@ function editorOeffnen(o) {
     $(m === "pinsel" ? "edPinsel" : "edRadierer").style.display = o.modi.includes(m) ? "" : "none");
   $("edBoxModus").style.display = o.modi.includes("box") ? "" : "none";
   $("edBodenModus").style.display = o.modi.includes("boden") ? "" : "none";
+  $("edLackModus").style.display = o.modi.includes("lack") ? "" : "none";
   $("edKzModus").style.display = o.modi.includes("kennzeichen") ? "" : "none";
   ED.ecken = o.ecken ? o.ecken.map(p => p.slice()) : [];
   $("edEcken").setAttribute("viewBox", `0 0 ${o.breite} ${o.hoehe}`);
@@ -4279,12 +4286,12 @@ function editorPunkt(ev) {
 
 function editorStrich(von, nach) {
   // Der Radierer wirkt auf beide Schichten, die Pinsel je auf ihre.
-  const schichten = ED.modus === "radierer" ? ["edMaske", "edBoden"]
-                  : [ED.modus === "boden" ? "edBoden" : "edMaske"];
+  const schichten = ED.modus === "radierer" ? ["edMaske", "edBoden", "edLack"]
+                  : [{boden: "edBoden", lack: "edLack"}[ED.modus] || "edMaske"];
   schichten.forEach(id => {
     const ctx = $(id).getContext("2d");
     ctx.globalCompositeOperation = ED.modus === "radierer" ? "destination-out" : "source-over";
-    ctx.strokeStyle = ctx.fillStyle = ED.modus === "boden" ? "#ff9900" : "#00ff66";
+    ctx.strokeStyle = ctx.fillStyle = {boden: "#ff9900", lack: "#3399ff"}[ED.modus] || "#00ff66";
     ctx.lineWidth = ED.pinsel;
     ctx.lineCap = ctx.lineJoin = "round";
     ctx.beginPath();
@@ -4351,6 +4358,7 @@ $("edPinsel").onclick = () => editorModus("pinsel");
 $("edRadierer").onclick = () => editorModus("radierer");
 $("edBoxModus").onclick = () => editorModus("box");
 $("edBodenModus").onclick = () => editorModus("boden");
+$("edLackModus").onclick = () => editorModus("lack");
 $("edKzModus").onclick = () => editorModus("kennzeichen");
 $("edGroesse").oninput = editorGroesse;
 $("edGroesser").onclick = () => editorZoom(ED.zoom * 1.25);
@@ -4358,7 +4366,7 @@ $("edKleiner").onclick = () => editorZoom(ED.zoom * 0.8);
 $("edEinpassen").onclick = editorEinpassen;
 $("edEins").onclick = () => editorZoom(1);
 $("edLeeren").onclick = () => {
-  ["edMaske", "edBoden"].forEach(id => {
+  ["edMaske", "edBoden", "edLack"].forEach(id => {
     const c = $(id);
     c.getContext("2d").clearRect(0, 0, c.width, c.height);
   });
@@ -4389,11 +4397,13 @@ $("edFertig").onclick = () => {
     ? $("edMaske").toDataURL("image/png") : null;
   const boden = ED.modi.includes("boden") && !editorMaskeLeer("edBoden")
     ? $("edBoden").toDataURL("image/png") : null;
+  const lack = ED.modi.includes("lack") && !editorMaskeLeer("edLack")
+    ? $("edLack").toDataURL("image/png") : null;
   const fertig = ED.fertig, box = ED.box;
   const ecken = ED.ecken && ED.ecken.length === 4 ? ED.ecken : null;
   $("edEditor").style.display = "none";
   ED = null;
-  fertig(maske, box, boden, ecken);
+  fertig(maske, box, boden, ecken, lack);
 };
 
 // ---------- Cloud-Modelle ----------

@@ -59,8 +59,9 @@ ACHSEN = {
 # es unter der Achse -- sonst haelt man eine Achse fuer kaputt, die dort nur
 # ueber den Prompt laeuft und deshalb kaum etwas tut.
 WIRKUNG_CLOUD = {
-    "paint": "Wird vorher selbst umgefärbt, das Modell gleicht an. Klappt bei "
-             "bunten Autos; ein weißes, schwarzes oder silbernes bleibt fast, wie es ist.",
+    "paint": "Wird vorher selbst umgefärbt, das Modell gleicht an. Bunte Autos "
+             "findet das Programm allein; ein weißes, schwarzes oder silbernes "
+             "braucht den gemalten Lack (⤢ ausmalen › 🎨 Lack), sonst bleibt es, wie es ist.",
     "scene": "Braucht den gemalten Boden (⤢ ausmalen › 🟫 Boden). Ohne ihn nur "
              "über den Text — das wirkt in der Cloud kaum. Jede Sorte wird beim "
              "ersten Mal einmal von der Cloud gemalt (ein Bild).",

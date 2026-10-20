@@ -600,7 +600,10 @@ Anhängerkupplung. Reiter **1 · Fotodaten**, von oben nach unten:
      kommen in jede Variante zurück, die Box ergibt sich daraus.
    - **🟫 Boden** — die freie Bodenfläche, grob mit großem Pinsel. Nur für
      die Achse Untergrund nötig.
-   - Der Radierer nimmt beides weg. Wer nicht malt, kann stattdessen eine
+   - **🎨 Lack** — die lackierte Karosserie, ohne Scheiben, Lichter, Kupplung
+     und Boden. Nötig für die Achse Lackfarbe, wenn das Auto weiß, schwarz
+     oder silber ist; ein buntes Auto findet das Programm auch allein.
+   - Der Radierer nimmt alles Gemalte weg. Wer nicht malt, kann stattdessen eine
      **Box** ziehen; ohne beides sucht der Erkenner die Box.
 
    Unter jedem Foto steht als Checkliste, was gemalt ist.
@@ -711,7 +714,7 @@ selbst setzen** unter Feineinstellung):
 | Achse | was vorher passiert |
 |---|---|
 | Kamera | das Foto wird perspektivisch verzogen (schräg, bodennah, erhöht), beschnitten (nah) oder gekippt; gemaltes Objekt und Boden wandern exakt mit, die Box auch. „Abstand“ und „Aufrecht“ gehen so nicht und wirken nur über den Text |
-| Farbe | die vorherrschende bunte Fläche bekommt den Zielton |
+| Farbe | der gemalte Lack bekommt den Zielton, Wölbung, Tropfen und Glanz bleiben; ohne gemalten Lack die vorherrschende bunte Fläche |
 | Untergrund | die gemalte Bodenfläche bekommt ein Bild der Sorte, mit dem Schatten des Fotos. Jede Sorte malt die Cloud beim ersten Mal einmal (ein bezahltes Bild), danach liegt sie unter `modelle\untergrund\` |
 | Licht | Farbton, Kontrast und Lichtverlauf; Rückleuchten bleiben im Dunkeln hell |
 
@@ -719,8 +722,9 @@ Eingesetzt wird danach aus genau dieser Vorlage. Gemessen mit einem
 Testlauf (je eine Achse): schräg, nah, golden, Schotter und rot — alle fünf
 mit eingesetzter Kupplung, Güte 0,39–0,54, die Box an der neuen Stelle.
 
-Grenzen: Ist das Auto selbst unbunt (weiß, schwarz, silber), findet das
-Vorfärben keine Fläche, und die Farbe hängt am Prompt allein. Ohne gemalten
+Grenzen: Ist das Auto selbst unbunt (weiß, schwarz, silber) und der Lack
+nicht gemalt, findet das Vorfärben keine Fläche, und die Farbe hängt am
+Prompt allein — sie bleibt dann praktisch, wie sie ist. Ohne gemalten
 Boden bleibt der Untergrund fast, wie er ist. Farbstimmung, Kameraart und
 Werkstoff laufen nur über den Text und wirken in der Cloud kaum. Wer volle
 Vielfalt *und* die echte Kupplung will, rechnet die Varianten mit Qwen-Image

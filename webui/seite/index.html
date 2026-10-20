@@ -794,6 +794,7 @@
         <span class="edgruppe">
           <button type="button" id="edPinsel" data-modus="pinsel" title="Das Objekt malen, das unverändert bleibt">🖌 Objekt</button>
           <button type="button" id="edBodenModus" data-modus="boden" title="Die Bodenfläche malen, die einen neuen Untergrund bekommt">🟫 Boden</button>
+          <button type="button" id="edLackModus" data-modus="lack" title="Den Lack der Karosserie malen, der umgefärbt wird">🎨 Lack</button>
           <button type="button" id="edKzModus" data-modus="kennzeichen" title="Die vier Ecken des Kennzeichens anklicken">▱ Kennzeichen</button>
           <button type="button" id="edRadierer" data-modus="radierer" title="Gemaltes wegnehmen">⌫ Radierer</button>
           <button type="button" id="edBoxModus" data-modus="box" title="Box um das Objekt ziehen">▭ Box ziehen</button>
@@ -823,6 +824,7 @@
           <img id="edBild" alt="" draggable="false">
           <canvas id="edMaske"></canvas>
           <canvas id="edBoden"></canvas>
+          <canvas id="edLack"></canvas>
           <svg id="edEcken" class="edecken" preserveAspectRatio="none"></svg>
           <div id="edBox" class="dsbox dsneu" style="display:none"></div>
           <div id="edZeiger" class="edzeiger"></div>
