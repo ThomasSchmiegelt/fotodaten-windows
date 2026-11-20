@@ -180,6 +180,25 @@ passend ein.
 
 ---
 
+### Variablen (#…#) und Bezugsperson (!…!)
+
+**Ein Wort in Rauten ist eine Variable.** `Eine Frau in #hose# am Strand`
+— dann auf **Variablen erkennen** unter dem Prompt klicken. Für jede
+Variable erscheint ein Feld; dort beliebig viele Werte eintragen, **einen je
+Zeile** (Kleid, Shorts, Jeans …). Jedes Bild der Serie bekommt zufällig einen
+davon. Mehrere Variablen (`#hose#`, `#farbe#`, `#ort#` …) werden unabhängig
+voneinander verteilt; wie viele Bilder es werden, sagt **Anzahl Bilder**.
+Derselbe Seed ergibt dieselbe Verteilung. Was jedes Bild gezogen hat, steht
+nach dem Lauf unter den Feldern. Die Werte merkt sich der Browser.
+
+**Ein Name oder eine Beschreibung in Ausrufezeichen ist die Bezugsperson.**
+`!Kai! kämpft gegen einen Ritter` oder `!die erste Frau! schaut in den
+Spiegel, hinter ihr ein Mann`. Blickwinkel („von unten“, „Profil“),
+Kameraeinstellung („Blick in den Spiegel“), Blick, Mimik und Haltung gelten
+dann für genau diese Person und nicht für irgendwen im Bild — wichtig bei
+Kampfszenen und Serien, etwa einer Umrundung. Die Ausrufezeichen verschwinden
+vor dem Rechnen.
+
 ## 4. Bilder bearbeiten, Effekte, Retusche
 
 1. Reiter **Bearbeiten**, unter **Referenzbilder** 1–4 Bilder hochladen.
@@ -846,6 +865,35 @@ Das Gespräch hat ein Gedächtnis: „mach es hochkant“ → „jetzt als Comic
 den Verlauf.
 
 ---
+
+## 11a. pi: einen Bildprompt im Gespräch entwickeln
+
+In der Kopfzeile öffnet **pi ↗** ein eigenes Fenster. Dort entwickelst du
+mit [pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) im
+Gespräch einen Bildprompt: beschreiben, nachfragen lassen, ändern. pi schreibt
+den Prompt auf Englisch und zeigt den Stand jeweils in einem Kasten.
+
+- **Bild anhängen** (auch per Einfügen oder Hineinziehen) und etwa „nimm das
+  T-Shirt vom Bild“ sagen — pi beschreibt genau dieses Teil und baut es ein.
+- **Gefühle** wie Angst oder Freude setzt pi in Sichtbares um: Gesicht,
+  Haltung, Licht, Farbe, Bildaufbau.
+- `#variablen#` und `!Bezugsperson!` lässt pi stehen und schlägt auf Wunsch
+  Werte vor.
+- **„senden“** (oder der Knopf *→ an Text→Bild senden*): Prompt, negativer
+  Prompt, Seitenverhältnis, Stil, Licht, Kamera, Blickwinkel, Anzahl und die
+  Werte der Variablen landen im Reiter Text→Bild. Gestartet wird nicht — erst
+  prüfen, dann auf *Erzeugen*. Danach wird das Sprachmodell aus dem
+  Grafikspeicher entladen, damit das Bildmodell Platz hat.
+- Unter jedem Prompt-Kasten steht **übernehmen** — für Modelle, die das
+  Werkzeug nicht von selbst aufrufen.
+
+pi muss installiert sein (`npm install -g @earendil-works/pi-coding-agent`)
+und ein Modell kennen (`~/.pi/agent/models.json`). Er läuft ohne Werkzeuge
+für Dateien oder Befehle — nur mit dem einen zum Übergeben.
+
+**Welches Sprachmodell wofür** stellt **Sprachmodelle** in der Kopfzeile ein:
+das kleine (Freitext, Übersetzen, Bilder lesen), das große (Geschichten) und
+das Modell für pi. Die Wahl gilt sofort und bleibt in `sprachmodelle.json`.
 
 ## 12. Galerie, Noten, Video, GIMP
 

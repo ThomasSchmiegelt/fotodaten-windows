@@ -18,6 +18,8 @@
     <a href="#" id="projektUm" title="Projekt umbenennen">umbenennen</a>
     <a href="#" id="projektWeg" title="Projekt mit allen Bildern löschen">löschen</a>
     <a href="#" id="cloudAuf" title="Sprach- und Bildmodell per API">Cloud-Modelle</a>
+    <a href="#" id="sprachAuf" title="Welches Sprachmodell wofür">Sprachmodelle</a>
+    <a href="#" id="piAuf" title="Im Gespräch mit pi einen Bildprompt entwickeln — eigenes Fenster">pi ↗</a>
   </span>
   <span id="dims"></span>
 </header>
@@ -101,6 +103,26 @@
       <p class="hint"><a href="#" onclick="cloudPruefen('bild');return false">Verbindung prüfen</a>
         <span id="cloud_bild_note"></span></p>
       <p class="hint"><a href="#" id="cloudSpeichern"><b>Speichern</b></a></p>
+    </fieldset>
+
+    <fieldset id="sprachBox" style="display:none">
+      <legend>Sprachmodelle</legend>
+      <p class="hint">Welches Ollama-Modell wofür. Gilt sofort und bleibt in
+        <code>sprachmodelle.json</code> neben dem Programm. Leer heißt: die
+        Vorgabe (<code>QWEN_CHAT_MODEL</code>, <code>QWEN_CHAT_GROSS</code>).
+        <span id="sprachCloud"></span></p>
+      <label for="sprachKlein">Klein — Freitext deuten, übersetzen, Bilder lesen</label>
+      <select id="sprachKlein"></select>
+      <label for="sprachGross">Groß — Geschichten, Gliederung, Prosa</label>
+      <select id="sprachGross"></select>
+      <h3 class="stufe">pi</h3>
+      <p class="hint" id="sprachPiNote">Das Modell im pi-Fenster. Die Liste
+        kommt von pi selbst (<code>~/.pi/agent/models.json</code>).</p>
+      <label for="sprachPi">Modell für pi</label>
+      <select id="sprachPi"><option value="">— Vorgabe von pi —</option></select>
+      <p class="hint"><a href="#" id="sprachPiListe">Liste von pi holen</a>
+        · <a href="#" id="sprachSpeichern"><b>Speichern</b></a>
+        <span id="sprachNote"></span></p>
     </fieldset>
 
     <div id="chatBox" style="display:none">
@@ -1078,6 +1100,19 @@
 
     <label for="prompt">Prompt</label>
     <textarea id="prompt"></textarea>
+    <p class="hint" id="varHilfe"><b>#hose#</b> — ein Wort in Rauten ist eine
+      Variable: <a href="#" id="varErkennen">Variablen erkennen</a>, dann je
+      Variable beliebig viele Werte eintragen, einen je Zeile. Jedes Bild
+      bekommt zufällig einen davon; mehrere Variablen werden unabhängig
+      voneinander verteilt, die Anzahl Bilder stellst du unten ein.
+      <b>!Name!</b> — ein Name oder eine Beschreibung in Ausrufezeichen
+      (<code>!Kai!</code>, <code>!die erste Frau!</code>) ist die Bezugsperson:
+      Blickwinkel, Kameraeinstellung (etwa „Blick in den Spiegel“), Blick,
+      Mimik und Haltung gelten für sie, nicht für irgendwen im Bild.
+      Beispiel: <code>!Kai! kämpft gegen einen Ritter, #waffe# in der Hand</code>
+      mit Blickwinkel „Von unten“.</p>
+    <div id="varFelder"></div>
+    <p class="hint" id="varNote"></p>
     <p class="hint">Deutsch ist in Ordnung — deutsche Eingaben werden vor dem
       Auftrag ins Englische übersetzt, weil das Bildmodell dem besser folgt.</p>
     <p class="hint" id="transNote" style="display:none"></p>

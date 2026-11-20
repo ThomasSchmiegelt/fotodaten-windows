@@ -872,11 +872,20 @@ async function start() {
     return say("Die Farbachse braucht ein Ziel — oder stell sie auf „unverändert lassen“.", "err");
   }
 
+  // Rauten-Variablen: vor dem Start einmal erkennen, damit ein frisch
+  // getipptes #hut# nicht ohne Feld (und damit ohne Werte) losgeht.
+  varErkennen(true);
+  const leer = varNamen(prompt).filter(n => !(varSammeln()[n.toLowerCase()] || []).length);
+  if (leer.length)
+    return say("Ohne Werte: " + leer.map(n => "#" + n + "#").join(", ")
+      + " — je Zeile einen Wert eintragen.", "err");
+
   let seed = parseInt($("seed").value, 10);
   if (isNaN(seed) || seed < 0) { seed = Math.floor(Math.random() * 2 ** 31); $("seed").value = seed; }
 
   const body = {
     mode: plan ? "gruppe" : mode, prompt,
+    variablen: varSammeln(),
     negative_prompt: $("negative").value,
     // Die Musterbilder nennt die Seite nur bei der Kennung; laden tut sie
     // der Server aus dem Projekt. Base64 durch den Browser zu schicken,
@@ -4592,6 +4601,7 @@ function poll() {
       // Was der Torwaechter gestrichen hat, soll man sehen.
       $("torNote").textContent = (s.tor || []).length
         ? "Aus dem Prompt gestrichen: " + s.tor.join(" · ") : "";
+      zeigeGezogen(s.gezogen);
       const f = s.fortschritt || {};
       if (f.von && !done) {
         // Ein Auftrag ohne Bilder -- Prompts schreiben, umreissen. Der Balken
@@ -5213,3 +5223,177 @@ fetch("/api/status").then(r => r.json()).then(s => {
   if (s.busy) { buttonState("busy"); poll(); }
 });
 loadGallery();
+
+
+// ---------- Rauten-Variablen und Bezugsperson ----------
+// #hose# im Prompt ist eine Variable mit beliebig vielen Werten, einer je
+// Zeile. Jedes Bild bekommt zufaellig einen davon; der Server zieht ihn aus
+// Seed und Bildnummer, damit dieselbe Serie wiederholbar bleibt. !Name! ist
+// die Bezugsperson -- das entscheidet ganz der Server (variablen.py).
+const VAR_MUSTER = /#([A-Za-zÄÖÜäöüß_][\wÄÖÜäöüß\-]{0,39})#/g;
+let varWerte = {};
+try { varWerte = JSON.parse(localStorage.getItem("bm-variablen") || "{}") || {}; }
+catch (e) { varWerte = {}; }
+
+function varNamen(text) {
+  const namen = [];
+  for (const m of String(text || "").matchAll(VAR_MUSTER))
+    if (!namen.some(n => n.toLowerCase() === m[1].toLowerCase())) namen.push(m[1]);
+  return namen;
+}
+
+function varMerken() {
+  document.querySelectorAll("#varFelder textarea").forEach(t => {
+    varWerte[t.dataset.name] = t.value;
+  });
+  try { localStorage.setItem("bm-variablen", JSON.stringify(varWerte)); } catch (e) {}
+}
+
+// `still`: beim Start -- vorhandene Felder bleiben, nur neue kommen dazu.
+function varErkennen(still) {
+  varMerken();
+  const namen = varNamen($("prompt").value);
+  const person = /!([A-Za-zÄÖÜäöüß][\wÄÖÜäöüß .\-]{0,39}?)!/.exec($("prompt").value);
+  $("varFelder").innerHTML = namen.map(n => {
+    const k = n.toLowerCase();
+    const zahl = String(varWerte[k] || "").split("\n").filter(z => z.trim()).length;
+    return `<div class="varFeld"><label for="var_${esc(k)}">#${esc(n)}# <span class="hint">${
+      zahl ? zahl + " Wert(e)" : "noch leer"}</span></label>
+      <textarea id="var_${esc(k)}" data-name="${esc(k)}" rows="3"
+        placeholder="Kleid&#10;Shorts&#10;Jeans">${esc(varWerte[k] || "")}</textarea></div>`;
+  }).join("");
+  document.querySelectorAll("#varFelder textarea").forEach(t => {
+    t.oninput = () => {
+      varMerken();
+      const zahl = t.value.split("\n").filter(z => z.trim()).length;
+      t.previousElementSibling.querySelector(".hint").textContent =
+        zahl ? zahl + " Wert(e)" : "noch leer";
+    };
+  });
+  if (!still || namen.length || person) {
+    $("varNote").textContent = (namen.length
+        ? namen.length + " Variable(n) erkannt. " : (still ? "" : "Keine #Variable# im Prompt. "))
+      + (person ? `Bezugsperson: ${person[1]} — Blick, Haltung und Kamera gelten für sie.` : "");
+  }
+}
+$("varErkennen").onclick = e => { e.preventDefault(); varErkennen(false); };
+
+function varSammeln() {
+  varMerken();
+  const aus = {};
+  for (const n of varNamen($("prompt").value)) {
+    const k = n.toLowerCase();
+    const liste = String(varWerte[k] || "").split("\n").map(z => z.trim()).filter(Boolean);
+    if (liste.length) aus[k] = liste;
+  }
+  return aus;
+}
+
+function zeigeGezogen(liste) {
+  if (!Array.isArray(liste) || !liste.length) return;
+  $("varNote").textContent = "Gezogen: " + liste.map((g, i) =>
+    `${i + 1}: ` + Object.entries(g).map(([k, v]) => `${k}=${v}`).join(", ")).join(" · ");
+}
+
+// ---------- pi ----------
+// pi laeuft in einem eigenen Fenster (/pi). Was dort mit "senden" fertig
+// wird, kommt ueber einen BroadcastChannel hierher -- auch wenn das Fenster
+// nicht von hier geoeffnet wurde. Eingetragen wird nur, gestartet nicht:
+// erst pruefen, dann rechnen.
+$("piAuf").onclick = e => {
+  e.preventDefault();
+  window.open("/pi", "bildermacher-pi", "width=620,height=860");
+};
+
+function piUebernehmen(d) {
+  if (!d || !d.prompt) return;
+  if (mode !== "t2i") setMode("t2i");
+  $("prompt").value = d.prompt;
+  ["aspect", "style", "light", "camera", "view"].forEach(k => {
+    if (d[k] !== undefined && d[k] !== "") $(k).value = d[k];
+  });
+  if (d.count) $("count").value = d.count;
+  if (d.negative_prompt !== undefined) $("negative").value = d.negative_prompt;
+  if (d.variablen) {
+    for (const [k, v] of Object.entries(d.variablen)) varWerte[k.toLowerCase()] = v.join("\n");
+    try { localStorage.setItem("bm-variablen", JSON.stringify(varWerte)); } catch (e) {}
+  }
+  varErkennen(true);
+  refresh();
+  say("Prompt von pi übernommen — Einstellungen prüfen, dann „" + MODES[mode].label + "“.", "ok");
+  $("go").classList.add("ready");
+  setTimeout(() => $("go").classList.remove("ready"), 6000);
+}
+try {
+  new BroadcastChannel("bildermacher").onmessage = e => {
+    if (e.data && e.data.art === "pi-uebergabe") piUebernehmen(e.data.daten);
+  };
+} catch (e) { /* sehr alter Browser: dann bleibt nur Kopieren */ }
+
+// ---------- Sprachmodelle ----------
+async function sprachRuf(rumpf) {
+  const r = await fetch("/api/sprachmodelle", {method: "POST",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify(rumpf)}).catch(() => null);
+  const d = r ? await r.json().catch(() => ({})) : {error: "Server nicht erreichbar"};
+  if (!r || !r.ok) throw new Error(d.error || "Fehler");
+  return d;
+}
+
+function sprachWahl(id, liste, wert, vorgabe) {
+  const alle = [...new Set([...(liste || []), wert].filter(Boolean))];
+  $(id).innerHTML = `<option value="">— ${esc(vorgabe)} —</option>`
+    + alle.map(m => `<option>${esc(m)}</option>`).join("");
+  $(id).value = wert || "";
+}
+
+async function sprachLaden() {
+  try {
+    const d = await sprachRuf({tu: "lesen"});
+    sprachWahl("sprachKlein", d.ollama, d.wahl.klein, "Vorgabe");
+    sprachWahl("sprachGross", d.ollama, d.wahl.gross, "Vorgabe");
+    $("sprachCloud").textContent = d.cloud
+      ? "Achtung: das Cloud-Sprachmodell ist eingeschaltet und geht diesen vor." : "";
+    const p = d.pi || {};
+    const aktuell = d.wahl.pi_provider ? d.wahl.pi_provider + "/" + d.wahl.pi_modell : "";
+    $("sprachPi").innerHTML = `<option value="">— Vorgabe von pi —</option>`
+      + (aktuell ? `<option>${esc(aktuell)}</option>` : "");
+    $("sprachPi").value = aktuell;
+    $("sprachPiNote").textContent = p.available
+      ? "Das Modell im pi-Fenster. Die Liste kommt von pi selbst (~/.pi/agent/models.json)."
+      : (p.reason || "pi nicht gefunden");
+  } catch (e) { $("sprachNote").textContent = " " + e.message; }
+}
+
+$("sprachAuf").onclick = e => {
+  e.preventDefault();
+  const auf = $("sprachBox").style.display === "none";
+  $("sprachBox").style.display = auf ? "block" : "none";
+  if (auf) sprachLaden();
+};
+$("sprachPiListe").onclick = async e => {
+  e.preventDefault();
+  $("sprachNote").textContent = " pi wird gefragt …";
+  try {
+    const r = await fetch("/api/pi", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({tu: "modelle"})});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "pi antwortet nicht");
+    const alt = $("sprachPi").value;
+    $("sprachPi").innerHTML = `<option value="">— Vorgabe von pi —</option>`
+      + d.modelle.map(m => `<option>${esc(m.provider + "/" + m.modell)}</option>`).join("");
+    $("sprachPi").value = alt || (d.provider ? d.provider + "/" + d.modell : "");
+    $("sprachNote").textContent = ` ${d.modelle.length} Modelle.`;
+  } catch (err) { $("sprachNote").textContent = " " + err.message; }
+};
+$("sprachSpeichern").onclick = async e => {
+  e.preventDefault();
+  const pi = $("sprachPi").value;
+  const schnitt = pi.indexOf("/");
+  try {
+    await sprachRuf({tu: "speichern", wahl: {
+      klein: $("sprachKlein").value, gross: $("sprachGross").value,
+      pi_provider: schnitt > 0 ? pi.slice(0, schnitt) : "",
+      pi_modell: schnitt > 0 ? pi.slice(schnitt + 1) : ""}});
+    $("sprachNote").textContent = " gespeichert.";
+  } catch (err) { $("sprachNote").textContent = " " + err.message; }
+};

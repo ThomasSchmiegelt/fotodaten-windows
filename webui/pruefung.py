@@ -90,8 +90,47 @@ BEKANNT = {
     "String", "Number", "Boolean", "Array", "Object", "JSON", "Math", "Promise",
     "Error", "Set", "Map", "Date", "RegExp", "alert", "confirm", "console",
     "FileReader", "Blob", "URL", "FormData", "Image", "atob", "btoa",
-    "Event",
+    "Event", "BroadcastChannel", "requestAnimationFrame",
 }
+
+
+def _ohne_vorlagen(code: str) -> str:
+    """Vorlagenzeichenketten (`...`) entfernen, auch verschachtelte.
+
+    Ein regulaerer Ausdruck schafft `a ${x ? `b (c)` : ""} d` nicht: er
+    endet am inneren Backtick, und "b (c)" sah aus wie ein Aufruf von b().
+    Ein kleiner Zaehler schon. Was in ${...} steht, ist Code und bleibt.
+    """
+    aus, stapel, i = [], [], 0      # stapel: offene ${ je Vorlagenebene
+    in_vorlage = 0
+    while i < len(code):
+        z = code[i]
+        if in_vorlage and (not stapel or stapel[-1] < in_vorlage):
+            # mitten im Text einer Vorlage
+            if z == "\\":
+                i += 2
+                continue
+            if z == "`":
+                in_vorlage -= 1
+                aus.append('""')
+            elif code.startswith("${", i):
+                stapel.append(in_vorlage)
+                aus.append("(")
+                i += 2
+                continue
+            elif z == "\n":
+                aus.append("\n")
+            i += 1
+            continue
+        if z == "`":
+            in_vorlage += 1
+        elif z == "}" and stapel and stapel[-1] == in_vorlage:
+            stapel.pop()
+            aus.append(")")
+        else:
+            aus.append(z)
+        i += 1
+    return "".join(aus)
 
 # Zeichenketten und Kommentare enthalten deutschen Fließtext -- "das ist (so)"
 # sähe sonst aus wie ein Aufruf von ist().
@@ -103,7 +142,8 @@ def _nur_code(skript: str) -> str:
 
     ohne = re.sub(r"/\*.*?\*/", leer, skript, flags=re.S)
     ohne = re.sub(r"(?<![:\w])//[^\n]*", " ", ohne)
-    for muster in (r"`(?:[^`\\]|\\.)*`", r"'(?:[^'\\\n]|\\.)*'", r'"(?:[^"\\\n]|\\.)*"'):
+    ohne = _ohne_vorlagen(ohne)
+    for muster in (r"'(?:[^'\\\n]|\\.)*'", r'"(?:[^"\\\n]|\\.)*"'):
         ohne = re.sub(muster, leer, ohne)
     return ohne
 

@@ -47,6 +47,15 @@ Das Bildmodell versteht Englisch deutlich besser. Uebersetze also, was der
 Benutzer will, und ergaenze es um anschauliche Details -- aber erfinde nichts,
 was seiner Absicht widerspricht.
 
+Gefuehle (Angst, Freude, Wut, Trauer ...) nie nur als Wort hinschreiben --
+das Bildmodell kann "fear" nicht malen. Zeige sie: Gesicht (weit
+aufgerissene Augen, zusammengepresste Lippen), Koerperhaltung (zurueck-
+weichend, Arme hochgerissen), Licht und Farbe (kaltes Seitenlicht, warmes
+Gegenlicht) und Bildaufbau (eng, von unten, viel leerer Raum).
+
+Woerter in Rauten wie #hose# und Namen in Ausrufezeichen wie !Kai! sind
+Platzhalter des Programms: unveraendert in den prompt uebernehmen.
+
 Die uebrigen Felder nur setzen, wenn der Benutzer es sagt oder eindeutig meint.
 Sonst weglassen. Erlaubte Werte, nichts anderes:
 

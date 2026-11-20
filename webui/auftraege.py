@@ -48,6 +48,7 @@ import sechsseiten  # noqa: E402
 import retusche  # noqa: E402
 import vervielfaeltigen  # noqa: E402
 from torwache import torwaechter  # noqa: E402
+import variablen  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -65,6 +66,9 @@ def ziel() -> str:
 engine = Engine()
 # Ergebnisse des laufenden bzw. zuletzt gelaufenen Auftrags.
 current = {"files": [], "error": None, "translated": {}, "stage": "",
+           # Was die Rauten-Variablen je Bild gezogen haben, in der
+           # Reihenfolge der Bilder.
+           "gezogen": [],
            "video": None, "gelesen": {}, "nummer": 0, "titel": "", "tor": [],
            "gliederung": [], "expose": {},
            # Der Katalogeintrag einer Sechs-Seiten-Ansicht, waehrend er
@@ -244,6 +248,10 @@ def _buendelbar(a: dict, b: dict) -> bool:
             return False            # die Boxen gehoeren zu genau diesem Auftrag
         if int(p.get("count", 1) or 1) != 1:
             return False
+        # Variablen und Bezugsperson baut run_job je Bild selbst ein.
+        text = str(p.get("prompt") or "")
+        if variablen.namen(text) or variablen.bezug(text)[1]:
+            return False
     return all(str(pa.get(k, "")) == str(pb.get(k, "")) for k in GLEICH)
 
 
@@ -261,6 +269,12 @@ def _fertiger_prompt(params: dict) -> tuple[str, int]:
     den Tisch. Ohne Text im Feld ging es gut, was die Suche nicht leichter
     gemacht haette.
     """
+    jobs = _fertige_jobs(params, 1, None)
+    return jobs[0]["prompt"], jobs[0]["seed"]
+
+
+def _fertige_jobs(params: dict, anzahl: int, sweep: str | None) -> list[dict]:
+    """Wie `_fertiger_prompt`, nur fuer eine ganze Serie samt Serienart."""
     seed = int(params.get("seed", 42))
     text = Engine.rahmen(
         params.get("prompt", ""),
@@ -275,12 +289,12 @@ def _fertiger_prompt(params: dict) -> tuple[str, int]:
         image_prompts=params.get("image_prompts") or [],
         subject=params.get("subject") or "fahrzeug",
         haltung=params.get("haltung") or None)
-    auftragsliste = Engine.plan(
-        text, 1, seed, None,
+    return Engine.plan(
+        text, anzahl, seed, sweep,
         subject=params.get("subject") or "fahrzeug",
         paint_target=params.get("paint_target") or "",
+        lock_seed=bool(params.get("lock_seed", False)),
         **{k: params.get(k) or None for k in ACHSEN})
-    return auftragsliste[0]["prompt"], auftragsliste[0]["seed"]
 
 
 def _abarbeiten(auftrag: dict, weitere: list[dict] | None = None) -> None:
@@ -296,6 +310,7 @@ def _abarbeiten(auftrag: dict, weitere: list[dict] | None = None) -> None:
         titel = (auftrag["titel"] if len(alle) == 1
                  else f"{len(alle)} Auftraege zusammen")
         current.update(files=[], error=None, translated={}, video=None,
+                       gezogen=[],
                        gelesen={}, tor=[], gliederung=[], expose={},
                        bau={}, seiten={}, datensatz={},
                        stage="wird vorbereitet",
@@ -314,8 +329,16 @@ def _abarbeiten(auftrag: dict, weitere: list[dict] | None = None) -> None:
         else:
             # Ein Ladevorgang fuer alle: die fertigen Prompts gehen als Liste
             # an run_series, genau wie bei einem Ablauf.
+            #
+            # Uebersetzt wird dabei jeder Auftrag fuer sich und *vor* dem
+            # Prompt -- run_job uebersetzt nur das Feld "prompt" und nimmt
+            # eine fertige Liste unbesehen. Lange gingen gebuendelte deutsche
+            # Prompts deshalb unuebersetzt an das Bildmodell.
+            for a in alle:
+                _translate_inputs(a["params"])
             fertig = [_fertiger_prompt(a["params"]) for a in alle]
             gemeinsam = dict(auftrag["params"])
+            gemeinsam["schon_uebersetzt"] = True
             gemeinsam["prompts"] = [t for t, _ in fertig]
             gemeinsam["seeds"] = [sd for _, sd in fertig]
             run_job(gemeinsam)
@@ -408,15 +431,41 @@ def _translate_inputs(params: dict) -> dict:
 
     Faellt Ollama aus, bleibt alles wie eingegeben -- lieber ein Bild aus
     deutschem Prompt als gar keines.
+
+    Die Werte der Rauten-Variablen gehen im selben Aufruf mit, und zwar
+    immer: "Kleid" hat weder Umlaut noch Artikel und saehe sonst englisch aus.
     """
+    if params.pop("schon_uebersetzt", False):
+        return {}
     quelle = {k: params.get(k) or "" for k in TRANSLATABLE}
+    werte = params.get("variablen") or {}
+    immer = []
+    # Die Bezugsperson kann ein Name sein ("Kai") oder eine Beschreibung
+    # ("die erste Frau"). Eine Beschreibung muss mit ins Englische -- sonst
+    # stuende am Ende "apply to die erste Frau". Ein Name kommt unveraendert
+    # zurueck.
+    if params.get("bezug"):
+        quelle["bezug"] = params["bezug"]
+        if " " in params["bezug"]:
+            immer.append("bezug")
+    for name, liste in werte.items():
+        for i, wert in enumerate(liste):
+            quelle[f"var:{name}:{i}"] = wert
+            immer.append(f"var:{name}:{i}")
     # Die Rollentexte der einzelnen Referenzbilder sind ebenfalls Freitext.
     rollen = list(params.get("image_prompts") or [])
     for i, text in enumerate(rollen):
         quelle[f"bild{i + 1}"] = text or ""
 
     engine.note("loading", "Eingaben werden übersetzt …")
-    fertig = chat.translate(quelle)
+    fertig = chat.translate(quelle, immer=tuple(immer))
+    if fertig.get("bezug"):
+        params["bezug"] = fertig.pop("bezug")
+    for name, liste in werte.items():
+        for i in range(len(liste)):
+            neu = fertig.pop(f"var:{name}:{i}", None)
+            if neu:
+                liste[i] = neu
 
     for i in range(len(rollen)):
         neu = fertig.get(f"bild{i + 1}")
@@ -499,7 +548,22 @@ def _series_kwargs(params: dict, refs: list, kind: str, on_image) -> dict:
 
 def run_job(params: dict) -> None:
     try:
+        # Rauten-Variablen und Bezugsperson vor der Uebersetzung heraus-
+        # nehmen: das Sprachmodell macht aus "#hose#" gern "#pants#" und aus
+        # "!Kai!" ein "Kai!". Siehe variablen.py.
+        params["variablen"] = variablen.werte_sauber(params.get("variablen"))
+        roh, person = variablen.bezug(str(params.get("prompt") or ""))
+        maskiert, reihe = variablen.maskieren(roh)
+        params["prompt"] = maskiert
+        params["bezug"] = person
         current["translated"] = _translate_inputs(params)
+        if reihe:
+            zurueck = variablen.entmaskieren(params["prompt"], reihe)
+            # Ging ein Platzhalter in der Uebersetzung verloren, bleibt der
+            # Satz, wie er war -- lieber deutsch als ohne Variable.
+            params["prompt"] = zurueck if zurueck is not None else roh
+        elif person:
+            params["prompt"] = params["prompt"] or roh
         # Die Zeilen eines Titelblatts sind Text, der ins Bild gemalt wird --
         # sie gehen deshalb *nach* der Uebersetzung in den Prompt. Durch sie
         # hindurch staende auf einem deutschen Heft Englisches.
@@ -532,6 +596,24 @@ def run_job(params: dict) -> None:
         # `prompts` kommt von einer Serie ueber eine Variable oder aus einem
         # Buendel: dieselbe Person in vier Jacken, ein Ladevorgang fuer alle.
         fertige = [p for p in (params.get("prompts") or []) if str(p).strip()]
+        samen = list(params.get("seeds") or [])
+        person = params.get("bezug") or person
+        if not fertige and (reihe or person) and params.get("prompt"):
+            # Je Bild eigene Werte -- also je Bild ein eigener fertiger
+            # Prompt. plan() baut die Serie wie sonst auch (Umrundung,
+            # Stile der Reihe nach ...), danach kommen Werte und Bezug hinein.
+            werte = params["variablen"]
+            for i, job in enumerate(_fertige_jobs(
+                    params, max(1, int(params.get("count", 1) or 1)),
+                    params.get("sweep") or None)):
+                text, gezogen = variablen.einsetzen(job["prompt"], werte,
+                                                    job["seed"], i)
+                eigener = variablen.einsetzen(params["prompt"], werte,
+                                              job["seed"], i)[0]
+                fertige.append(variablen.auf_person(text, person, eigener))
+                samen.append(job["seed"])
+                if gezogen:
+                    current["gezogen"].append(gezogen)
         if not fertige:
             # Ohne fertige Liste baut plan() den Prompt -- damit der
             # Torwaechter auch dort greift, wird er hier einmal gebaut.
@@ -551,7 +633,8 @@ def run_job(params: dict) -> None:
         current["tor"] = gestrichen
 
         engine.run_series(**_series_kwargs(params, refs, kind, on_image),
-                          **({"prompts": fertige} if fertige else {}))
+                          **({"prompts": fertige} if fertige else {}),
+                          **({"seeds": samen} if fertige and samen else {}))
         done = len(current["files"])
         meldung = f"fertig: {done} Bild(er)" if done else "abgebrochen"
 
@@ -586,8 +669,9 @@ def run_fotodaten(params: dict) -> None:
     nebeneinander, und so laden sie je nur einmal. Siehe fotodaten.py.
     """
     try:
-        engine._cancel = False
-        engine.aborted = False
+        # Kein Zuruecksetzen von `aborted` hier: das tut _abarbeiten vor dem
+        # Auftrag. Ein Abbruch, der zwischen Start und dieser Zeile kam,
+        # ginge sonst verloren.
         projekt = _projekt_des_laufs
         subject = params.get("subject") or "fahrzeug"
         klasse = str(params.get("klasse") or "").strip()
@@ -805,8 +889,6 @@ def run_vervielfaeltigen(params: dict) -> None:
     import random
     umgebung = None
     try:
-        engine._cancel = False
-        engine.aborted = False
         projekt = _projekt_des_laufs
         vorlagen = datensatz.originale(projekt)
         if not vorlagen:
@@ -966,7 +1048,7 @@ def run_aufbau(params: dict) -> None:
             engine.note("idle", f"Rahmen steht, {len(stuecke)} Abschnitte")
             return
 
-        kapitel = params.get("kapitel") or []
+        kapitel = [k for k in (params.get("kapitel") or []) if isinstance(k, dict)]
         if not kapitel:
             raise ValueError("Keine Abschnitte -- erst den Rahmen holen.")
         anfang = (params.get("anfang") or "").strip()
@@ -979,17 +1061,12 @@ def run_aufbau(params: dict) -> None:
         gesamt = sum(laengen)
         anteile = [max(1, round(offen * n / gesamt)) for n in laengen]
         zeilen = [anfang] if anfang else []
-        for i, (kap, wie) in enumerate(zip(kapitel, anteile), 1):
-            melden(f"Abschnitt {i} von {len(kapitel)}: {kap.get('titel') or ''}",
-                   i - 1, len(kapitel))
-            zeilen += [z for z in chat.szenen_aus_abschnitt(
-                kap.get("text") or "", wie, kapitel_titel=kap.get("titel") or "",
-                kurz=params.get("kurz") or "", welt=params.get("welt") or "",
-                fiktion=params.get("fiktion"), stil=params.get("stil") or "",
-                alter=params.get("alter") or "", bisher="\n".join(zeilen[-8:]),
-                schluss=ende if i == len(kapitel) else "",
-                model=modell) if z]
-        chat.entladen(modell or chat.GROSS)
+        try:
+            _abschnitte_bauen(kapitel, anteile, zeilen, params, ende, modell)
+        finally:
+            # Auch bei einem Fehler: das grosse Modell haelt sonst zehn
+            # Minuten lang 16 GB, und der naechste Bildauftrag laeuft leer.
+            chat.entladen(modell or chat.GROSS)
         current["expose"] = {"szenen": zeilen, "nur_szenen": True}
         melden("")
         engine.note("idle", f"{len(zeilen)} Szenen aus {len(kapitel)} Abschnitten")
@@ -998,6 +1075,22 @@ def run_aufbau(params: dict) -> None:
         print(err, file=sys.stderr)
         current["error"] = err.strip().splitlines()[-1]
         engine.note("error", current["error"])
+
+
+def _abschnitte_bauen(kapitel, anteile, zeilen, params, ende, modell) -> None:
+    """Die Szenen je Abschnitt; aus run_aufbau herausgezogen fuer das finally."""
+    for i, (kap, wie) in enumerate(zip(kapitel, anteile), 1):
+        if not isinstance(kap, dict):
+            continue
+        melden(f"Abschnitt {i} von {len(kapitel)}: {kap.get('titel') or ''}",
+               i - 1, len(kapitel))
+        zeilen += [z for z in chat.szenen_aus_abschnitt(
+            kap.get("text") or "", wie, kapitel_titel=kap.get("titel") or "",
+            kurz=params.get("kurz") or "", welt=params.get("welt") or "",
+            fiktion=params.get("fiktion"), stil=params.get("stil") or "",
+            alter=params.get("alter") or "", bisher="\n".join(zeilen[-8:]),
+            schluss=ende if i == len(kapitel) else "",
+            model=modell) if z]
 
 
 def run_prosa(params: dict) -> None:
@@ -1631,8 +1724,7 @@ def _erstes_bild(params: dict, projekt: str) -> None:
 def run_detektor(params: dict) -> None:
     """Ein Detektor-Training. Laeuft als Auftrag, weil es die Karte fuer sich braucht."""
     try:
-        engine._cancel = False
-        engine.aborted = False
+        engine._cancel = engine.aborted
         erg = detektor.trainieren(
             _projekt_des_laufs, str(params.get("modell") or "dfine-nano"),
             max(1, min(1000, int(params.get("epochen") or 50))),

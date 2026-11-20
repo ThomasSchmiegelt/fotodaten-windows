@@ -45,3 +45,9 @@ lokal.bat
 python/
 python-embed.zip
 daten/
+
+# Wahl der Sprachmodelle (Kopfzeile › Sprachmodelle) -- je Rechner
+sprachmodelle.json
+
+# Protokolle von einrichten.sh und start.sh
+*.log

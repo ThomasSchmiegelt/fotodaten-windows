@@ -108,8 +108,20 @@ def eintraege(projekt: str) -> list[dict]:
 
 
 def _speichern(projekt: str, daten: list[dict]) -> None:
-    with open(_eintraege_datei(projekt), "w", encoding="utf-8") as fh:
-        json.dump(daten, fh, ensure_ascii=False, indent=1)
+    # Nebendatei + os.replace: ein Absturz mitten im Schreiben laesst sonst
+    # eine halbe eintraege.json zurueck, und eintraege() liest sie als leer.
+    ziel = _eintraege_datei(projekt)
+    tmp = f"{ziel}.{os.getpid()}.{threading.get_ident()}.tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(daten, fh, ensure_ascii=False, indent=1)
+        os.replace(tmp, ziel)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     _formate(projekt, daten)
 
 

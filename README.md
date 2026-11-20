@@ -44,6 +44,31 @@ Diese README erklärt, wie es gebaut ist und warum.
 
 Entwickelt und gemessen auf einer **RTX 3090 (24 GB) mit 31 GB Arbeitsspeicher**.
 
+## Schnellstart unter Ubuntu
+
+1. Repository klonen oder hierher kopieren (ein Ordner ohne Leerzeichen).
+2. `python3` mit `venv` vorhanden lassen — `sudo apt install python3-venv`.
+3. **`./einrichten.sh`** ausführen (die Ubuntu-Fassung von `einrichten.bat`; es
+   legt die virtuelle Umgebung, die Pakete und die Modelle in **diesen Ordner** —
+   `qwen_bild/`, `daten/hf/`, `modelle/yolo/`):
+
+   | Aufruf | Für | Größe |
+   |---|---|---|
+   | `./einrichten.sh` | Bilder per Cloud-API, Boxen und Training ab 6 GB | ~9 GB |
+   | `./einrichten.sh training` | nur Detektor-Training (YOLO26, D-FINE) | ~4 GB |
+   | `./einrichten.sh nurcloud` | nur Bilder per Cloud-API, keine Grafikkarte nötig | ~100 MB |
+   | `./einrichten.sh lokal` | dazu Qwen-Image 2.1 auf der eigenen Karte (~17 GB Grafikspeicher) | ~40 GB |
+
+   `cu126` statt `cu130` für GTX 10xx (Pascal); `ohnemodelle` lädt die Modelle
+   erst beim ersten Gebrauch. Skript darf mehrfach laufen — was schon da ist,
+   wird nur geprüft. Am Ende lädt es einmal torch, transformers, Ultralytics
+   und polars zur Probe und meldet die CUDA-GPU.
+4. **`./start.sh`** starten. Der Browser öffnet `http://127.0.0.1:7860`.
+
+Danach ist der Ordner wie unter Windows **portabel**: `qwen_bild/`, `daten/`,
+`modelle/` und Projekte liegen alle darin. Eigene maschinenbezogene Werte
+(QWEN_HOST, QWEN_IMAGE_REVISION ...) stehen in `lokal.env` — nicht im Repository.
+
 ## Warum zwei Phasen
 
 Qwen-Image 2.1 wiegt in bfloat16 rund **33 GB**: Text-Encoder ~17,5 GB,
@@ -626,6 +651,24 @@ Die **Kulisse** hinter der Person — Auto, Raumschiff, Fangemeinde, Pferd,
 Bagger, Bücherwand und weitere — wird ohne Angabe aus dem Seed abgeleitet und
 wechselt damit von Lauf zu Lauf, bleibt aber reproduzierbar.
 
+## pi, Variablen und Bezugsperson
+
+**pi** läuft als Kindprozess im RPC-Modus (`pi --mode rpc --no-session`,
+ohne AGENTS.md, Skills und Dateiwerkzeuge). Sein einziges Werkzeug,
+`bildprompt_senden`, tut selbst nichts: der Server liest den Aufruf aus dem
+Ereignisstrom, prüft die Einstellungen gegen die echten Kataloge und reicht
+sie über einen `BroadcastChannel` an die Hauptseite. Nach der Übergabe wird
+ein Ollama-Modell mit `keep_alive: 0` entladen — pi spricht Ollama über die
+OpenAI-Schnittstelle, und die hielte es sonst fünf Minuten auf der Karte.
+
+**`#name#`** wird je Bild aus den Werten gezogen, reproduzierbar aus Seed
+und Bildnummer. Durch die Übersetzung gehen die Platzhalter als `[[1]]`,
+`[[2]]` — „#hose#“ kam sonst als „#pants#“ zurück oder fehlte; die Werte
+gehen als eigene Felder im selben Aufruf mit. **`!Name!`** (auch
+`!die erste Frau!`) richtet die angehängten Katalogtexte („the person …“)
+auf diese Person und sagt am Ende ausdrücklich, für wen Blick, Haltung und
+Kamera gelten. Der eigene Text des Benutzers bleibt dabei unangetastet.
+
 ## GIMP-Plugin
 
 ```bash
@@ -668,6 +711,11 @@ nicht gelesen.
 | `QWEN_NUR_CLOUD` | – | `1`: Bildmodell nie lokal laden (portable Fassung) |
 | `QWEN_YOLO_ORDNER` | `modelle/yolo` | YOLO26-Gewichte und -Einstellungen |
 | `QWEN_YOLO_BATCH` | `0.6` | Stapelgröße; unter 1 als Anteil des Grafikspeichers |
+| `QWEN_PI` | `pi` im Suchpfad | Befehl für pi (Fenster **pi ↗**) |
+
+Welches Ollama-Modell wofür (klein, groß, pi) lässt sich zur Laufzeit unter
+**Sprachmodelle** in der Kopfzeile wählen; das geht den Variablen vor und
+steht in `sprachmodelle.json` (in `.gitignore`).
 
 Cloud-Zugänge stehen nicht in Umgebungsvariablen, sondern in
 `einstellungen.json` (Rechte 600, in `.gitignore`) — eingetragen über
@@ -772,6 +820,9 @@ webui/detektor_lauf.py  das Training selbst, als eigener Prozess; mAP-Berechnung
 webui/yolo_lauf.py    YOLO26-Training (Ultralytics), ebenfalls eigener Prozess
 webui/fotodaten.py    echte Fotos: Plan der Varianten, EXIF, Box umrechnen
 webui/browser_oeffnen.py  Browser oeffnen, sobald der Server antwortet (start.bat)
+webui/variablen.py    #Variablen# und !Bezugsperson! im Prompt
+webui/pibruecke.py    pi im RPC-Modus als Prompt-Gespraech; pi/bildprompt.ts
+                      ist sein einziges Werkzeug, seite/pi.html das Fenster
 einrichten.bat        portable Einrichtung unter Windows (laedt Python, Pakete, Modelle)
 start.bat             Start unter Windows (portabel oder venv)
 installieren.bat      venv qwen_bild fuer die Entwicklung unter Windows

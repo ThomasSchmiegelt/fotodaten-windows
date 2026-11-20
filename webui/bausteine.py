@@ -21,6 +21,8 @@ import json
 import os
 import re
 import shutil
+import tempfile
+import threading
 import time
 
 import projekte
@@ -36,6 +38,20 @@ ARTEN = {"person": "Person", "ort": "Ort", "gegenstand": "Gegenstand",
 # Eine Luecke: {kleidung}. Nur schlichte Namen, damit sich nichts mit den
 # geschweiften Klammern beisst, die in Prompt-Vorlagen vorkommen.
 LUECKE = re.compile(r"\{([a-zA-Z][a-zA-Z0-9_]{0,29})\}")
+
+
+# Lesen-aendern-schreiben laeuft aus mehreren Threads (Server, Auftragslauf);
+# ohne Sperre ueberschreibt der eine Lauf die Aenderung des anderen. Reentrant,
+# weil kopieren() und andere Funktionen unter der Sperre speichern() rufen.
+_SPERRE = threading.RLock()
+
+
+def _gesperrt(fn):
+    def innen(*a, **k):
+        with _SPERRE:
+            return fn(*a, **k)
+    innen.__name__, innen.__doc__ = fn.__name__, fn.__doc__
+    return innen
 
 
 def _datei(projekt: str) -> str:
@@ -59,8 +75,20 @@ def liste(projekt: str) -> list[dict]:
 
 
 def _schreiben(projekt: str, daten: list[dict]) -> None:
-    with open(_datei(projekt), "w", encoding="utf-8") as fh:
-        json.dump(daten, fh, ensure_ascii=False, indent=2)
+    # Erst in eine Nebendatei, dann umbenennen: ein Absturz mitten im
+    # Schreiben laesst sonst eine halbe, unlesbare bausteine.json zurueck.
+    ziel = _datei(projekt)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(ziel), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(daten, fh, ensure_ascii=False, indent=2)
+        os.replace(tmp, ziel)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def variablen(prompt: str) -> list[str]:
@@ -197,6 +225,7 @@ def _bildliste(roh) -> list[dict]:
     return raus[-20:]
 
 
+@_gesperrt
 def bild_anhaengen(projekt: str, kennung: str, feld: str, datei: str,
                    wozu: str = "", prompt: str = "") -> bool:
     """Ein weiteres Bild an einen Baustein haengen, ohne die uebrigen
@@ -217,6 +246,7 @@ def bild_anhaengen(projekt: str, kennung: str, feld: str, datei: str,
     return False
 
 
+@_gesperrt
 def speichern(projekt: str, baustein: dict) -> dict:
     """Legt einen Baustein an oder ersetzt einen vorhandenen."""
     art = baustein.get("art") if baustein.get("art") in ARTEN else "person"
@@ -284,6 +314,7 @@ def speichern(projekt: str, baustein: dict) -> dict:
     return neu
 
 
+@_gesperrt
 def zusammenfuehren(projekt: str, von: str, nach: str) -> dict:
     """Zwei Bausteine zu einem machen. `von` geht auf, `nach` bleibt.
 
@@ -313,6 +344,7 @@ def zusammenfuehren(projekt: str, von: str, nach: str) -> dict:
             "neuer_name": ziel.get("name") or ""}
 
 
+@_gesperrt
 def loeschen(projekt: str, kennung: str) -> bool:
     daten = liste(projekt)
     rest = [b for b in daten if b.get("id") != kennung]
@@ -322,6 +354,7 @@ def loeschen(projekt: str, kennung: str) -> bool:
     return True
 
 
+@_gesperrt
 def bild_setzen(projekt: str, kennung: str, datei: str,
                 feld: str = "bild") -> bool:
     """Haengt das erzeugte Bild an den Baustein. Ruft der Auftragslauf auf,
@@ -493,20 +526,31 @@ def kopieren(von: str, nach: str, kennung: str) -> dict | None:
     if not quelle:
         return None
 
-    bild = quelle.get("bild") or ""
-    if bild:
-        herkunft = os.path.join(projekte.bilder(von), os.path.basename(bild))
-        ziel = os.path.join(projekte.bilder(nach), os.path.basename(bild))
-        if os.path.isfile(herkunft) and not os.path.isfile(ziel):
+    def mitnehmen(datei: str) -> str:
+        """Kopiert eine Bilddatei ins Zielprojekt; leer, wenn sie fehlt."""
+        if not datei:
+            return ""
+        herkunft = os.path.join(projekte.bilder(von), os.path.basename(datei))
+        ziel = os.path.join(projekte.bilder(nach), os.path.basename(datei))
+        if not os.path.isfile(herkunft):
+            return ""                     # Bild ist weg, Baustein bleibt
+        if not os.path.isfile(ziel):
             shutil.copy2(herkunft, ziel)
-        elif not os.path.isfile(herkunft):
-            bild = ""                     # Bild ist weg, Baustein bleibt
+        return datei
 
-    # Ohne Kennung: das Ziel vergibt eine eigene, sonst kollidierte sie mit
-    # einem gleich benannten Baustein, der dort schon liegt.
-    return speichern(nach, {"art": quelle.get("art"), "name": quelle.get("name"),
-                            "prompt": quelle.get("prompt"),
-                            "variablen": quelle.get("variablen"), "bild": bild})
+    # Alle Felder, auch Gesicht, Kleidung, Posen usw.: sonst ist die Kopie
+    # eine halbe Person. Ohne Kennung: das Ziel vergibt eine eigene, sonst
+    # kollidierte sie mit einem gleich benannten Baustein, der dort liegt.
+    neu = {k: v for k, v in quelle.items() if k != "id"}
+    neu["bild"] = mitnehmen(quelle.get("bild") or "")
+    neu["bild_augen"] = mitnehmen(quelle.get("bild_augen") or "")
+    for feld in BILDFELDER:
+        eintraege = []
+        for e in _bildliste(quelle.get(feld)):
+            if mitnehmen(e["datei"]):
+                eintraege.append(e)
+        neu[feld] = eintraege
+    return speichern(nach, neu)
 
 
 

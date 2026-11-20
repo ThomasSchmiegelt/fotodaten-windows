@@ -48,6 +48,14 @@ def _schluessel(name: str) -> str:
     return roh or f"projekt-{int(time.time())}"
 
 
+def _pruefen(schluessel: str) -> str:
+    """Schluessel werden zu Pfaden: alles ausser Allgemein und dem
+    Schluesselmuster (etwa "../x") wird abgelehnt, sonst Pfad-Ausbruch."""
+    if schluessel != ALLGEMEIN and not SCHLUESSEL.fullmatch(schluessel or ""):
+        raise ValueError(f"ungueltiger Projektschluessel: {schluessel!r}")
+    return schluessel
+
+
 def ordner(schluessel: str) -> str:
     """Das Datenverzeichnis eines Projekts -- fuer alles ausser den Bildern.
 
@@ -55,13 +63,14 @@ def ordner(schluessel: str) -> str:
     liegen: die Bausteine brauchen einen Platz, und `outputs/` soll nur
     Bilder enthalten.
     """
-    pfad = os.path.join(WURZEL, schluessel)
+    pfad = os.path.join(WURZEL, _pruefen(schluessel))
     os.makedirs(pfad, exist_ok=True)
     return pfad
 
 
 def bilder(schluessel: str) -> str:
     """Das Bildverzeichnis eines Projekts. Legt es bei Bedarf an."""
+    _pruefen(schluessel)
     pfad = ALT if schluessel == ALLGEMEIN else os.path.join(WURZEL, schluessel, "bilder")
     os.makedirs(pfad, exist_ok=True)
     return pfad
@@ -143,7 +152,7 @@ def anlegen(name: str) -> dict:
 def umbenennen(schluessel: str, name: str) -> bool:
     """Nur der Anzeigename aendert sich. Der Schluessel bleibt, sonst muesste
     das Verzeichnis mitwandern und alle Pfade waeren ungueltig."""
-    if schluessel == ALLGEMEIN:
+    if schluessel == ALLGEMEIN or not SCHLUESSEL.fullmatch(schluessel or ""):
         return False
     datei = os.path.join(WURZEL, schluessel, "projekt.json")
     if not os.path.isfile(datei):

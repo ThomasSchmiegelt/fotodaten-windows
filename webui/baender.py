@@ -16,6 +16,8 @@ import copy
 import json
 import os
 import re
+import tempfile
+import threading
 import time
 
 import projekte
@@ -31,6 +33,20 @@ BAND = ("idee", "kurz", "titel", "zeilen", "prompts",
         # Anfang und Ende stehen fest, bevor die Mitte entsteht; die
         # Abschnitte sind die Stuecke der Vorlage samt Ueberschrift.
         "anfang", "ende", "kapitel")
+
+
+# Lesen-aendern-schreiben kommt aus mehreren Threads; ohne Sperre gewinnt der
+# letzte Schreiber und die Aenderung des anderen ist weg. Reentrant, weil
+# fassung_holen() fassung_sichern() ruft.
+_SPERRE = threading.RLock()
+
+
+def _gesperrt(fn):
+    def innen(*a, **k):
+        with _SPERRE:
+            return fn(*a, **k)
+    innen.__name__, innen.__doc__ = fn.__name__, fn.__doc__
+    return innen
 
 
 def _ordner(projekt: str) -> str:
@@ -70,11 +86,22 @@ def lesen(projekt: str, schluessel: str) -> dict:
 
 def _schreiben(projekt: str, g: dict) -> dict:
     g["geaendert"] = time.strftime("%Y-%m-%d %H:%M")
-    with open(_datei(projekt, g["schluessel"]), "w", encoding="utf-8") as fh:
-        json.dump(g, fh, ensure_ascii=False, indent=2)
+    ziel = _datei(projekt, g["schluessel"])
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(ziel), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(g, fh, ensure_ascii=False, indent=2)
+        os.replace(tmp, ziel)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
     return g
 
 
+@_gesperrt
 def anlegen(projekt: str, name: str, globale: dict | None = None) -> dict:
     """Eine neue Geschichte mit erstem, noch leerem Band."""
     basis = projekte._schluessel(name)
@@ -87,6 +114,7 @@ def anlegen(projekt: str, name: str, globale: dict | None = None) -> dict:
     return _schreiben(projekt, g)
 
 
+@_gesperrt
 def speichern(projekt: str, schluessel: str, daten: dict) -> dict:
     """Vorgaben und einen Band ablegen.
 
@@ -127,6 +155,7 @@ def _band(g: dict, nr: int) -> dict | None:
     return next((b for b in g.get("baende") or [] if b.get("nr") == nr), None)
 
 
+@_gesperrt
 def fassung_sichern(projekt: str, schluessel: str, nr: int,
                     name: str = "") -> dict:
     """Den jetzigen Stand eines Bandes als Fassung ablegen."""
@@ -154,6 +183,7 @@ def fassungen(projekt: str, schluessel: str, nr: int) -> list[dict]:
             for i, f in enumerate(band.get("fassungen") or [])] if band else []
 
 
+@_gesperrt
 def fassung_holen(projekt: str, schluessel: str, nr: int, index: int) -> dict:
     """Eine Fassung zurueckholen. Der jetzige Stand wird vorher gesichert.
 
@@ -180,6 +210,7 @@ def fassung_holen(projekt: str, schluessel: str, nr: int, index: int) -> dict:
     return g
 
 
+@_gesperrt
 def fassung_loeschen(projekt: str, schluessel: str, nr: int,
                      index: int) -> bool:
     g = lesen(projekt, schluessel)
@@ -192,6 +223,7 @@ def fassung_loeschen(projekt: str, schluessel: str, nr: int,
     return True
 
 
+@_gesperrt
 def band_anlegen(projekt: str, schluessel: str) -> dict:
     """Den naechsten Band anhaengen. Die Vorgaben gelten weiter."""
     g = lesen(projekt, schluessel)
@@ -223,8 +255,10 @@ def verweis_umbenennen(projekt: str, alt: str, neu: str) -> int:
     if not alt or not neu or alt.lower() == neu.lower():
         return 0
     return _in_allen_zeilen(
-        projekt, re.compile(r"/(-?)" + re.escape(alt) + r"\b", re.I),
-        r"/\g<1>" + neu)
+        projekt, re.compile(r"/(-?)" + re.escape(alt) + r"(?!\w)", re.I),
+        # Funktion statt Vorlagentext: ein Backslash im Namen waere sonst
+        # eine Escape-Folge.
+        lambda m: "/" + m.group(1) + neu)
 
 
 # Ein Vorwort und ein Artikel davor fallen beim Entfernen mit: aus "rennt
@@ -247,12 +281,13 @@ def verweis_entfernen(projekt: str, name: str) -> int:
     if not name:
         return 0
     muster = re.compile(
-        rf"(?:\b(?:{VORWORT})\s+)?(?:\b(?:{ARTIKEL})\s+)?/-?{re.escape(name)}\b",
+        rf"(?:\b(?:{VORWORT})\s+)?(?:\b(?:{ARTIKEL})\s+)?/-?{re.escape(name)}(?!\w)",
         re.I)
-    return _in_allen_zeilen(projekt, muster, "")
+    return _in_allen_zeilen(projekt, muster, lambda m: "", entfernen=True)
 
 
-def _in_allen_zeilen(projekt: str, muster, ersatz: str) -> int:
+@_gesperrt
+def _in_allen_zeilen(projekt: str, muster, ersatz, entfernen: bool = False) -> int:
     """Ein Muster in allen Szenenzeilen aller Geschichten ersetzen."""
     geaendert = 0
     for eintrag in liste(projekt):
@@ -262,7 +297,7 @@ def _in_allen_zeilen(projekt: str, muster, ersatz: str) -> int:
             for z in band.get("zeilen") or []:
                 text = str(z.get("text") or "")
                 neu_text = muster.sub(ersatz, text)
-                if ersatz == "":
+                if entfernen:
                     neu_text = re.sub(r"\s+([,.;!?])", r"\1", neu_text)
                     neu_text = re.sub(r"\s{2,}", " ", neu_text).strip()
                 if neu_text != text:

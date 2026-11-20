@@ -664,3 +664,8 @@ ol.anleitung ul { padding-left: 18px; margin: 4px 0; }
 .fdwirkung { margin: 2px 0 0 24px; }
 details.fdfein { margin-top: 10px; }
 details.fdfein summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+
+/* Rauten-Variablen unter dem Prompt: je Variable ein Feld, ein Wert je Zeile. */
+#varFelder { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-top: 6px; }
+#varFelder textarea { min-height: 60px; font-size: 12px; }
+#varFelder label { margin-top: 0; }

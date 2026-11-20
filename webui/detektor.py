@@ -21,13 +21,16 @@ Ablage je Projekt:
         val_vorhersagen.jpg  vier Validierungsbilder: gruen Wahrheit, rot Vorhersage
 """
 
+import atexit
 import csv
 import hashlib
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
+import tempfile
 import time
 
 import datensatz
@@ -64,6 +67,31 @@ def _hat_gewichte(gewichte: str) -> bool:
             or os.path.isfile(os.path.join(gewichte, "best.pt")))
 
 
+# Der laufende Trainingsprozess. Stirbt der Server (Strg+C, kill), bliebe er
+# sonst als Waise auf der GPU zurueck; der atexit-Haken raeumt ihn weg.
+_LAUFENDER = None
+
+
+def _toeten(prozess, sig=None) -> None:
+    """Prozess samt Kindern hart beenden (Linux: Prozessgruppe)."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(prozess.pid)],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return
+    try:
+        os.killpg(os.getpgid(prozess.pid), sig or signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+
+
+def _aufraeumen() -> None:
+    if _LAUFENDER is not None and _LAUFENDER.poll() is None:
+        _toeten(_LAUFENDER)
+
+
+atexit.register(_aufraeumen)
+
+
 def _beenden(prozess) -> None:
     """Den Trainingsprozess samt seiner Lader-Prozesse beenden.
 
@@ -75,11 +103,16 @@ def _beenden(prozess) -> None:
         subprocess.run(["taskkill", "/T", "/F", "/PID", str(prozess.pid)],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
-        prozess.terminate()
+        # Die Prozessgruppe, nicht nur der Hauptprozess: auch hier haengen
+        # Lader-Prozesse dran.
+        _toeten(prozess, signal.SIGTERM)
     try:
         prozess.wait(timeout=30)
     except subprocess.TimeoutExpired:
-        prozess.kill()
+        if os.name == "nt":
+            prozess.kill()
+        else:
+            _toeten(prozess)
 
 
 def ordner(projekt: str) -> str:
@@ -148,7 +181,10 @@ def aufteilen(projekt: str, val_anteil: float) -> dict:
         val = [e for e in eintraege if _wert(e["datei"]) < val_anteil] or eintraege[:1]
         hinweis = ("Alle Bilder stammen aus einem Auftrag -- die Validierung "
                    "ist darum zu optimistisch.")
-    train = [e for e in eintraege if e not in val]
+    # Ueber die Dateinamen: "e not in val" waere je Eintrag ein Listenvergleich
+    # ganzer Dicts, bei tausenden Bildern quadratisch.
+    val_dateien = {e["datei"] for e in val}
+    train = [e for e in eintraege if e["datei"] not in val_dateien]
     for name, liste in (("train.txt", train), ("val.txt", val)):
         with open(os.path.join(wurzel, name), "w", encoding="utf-8") as fh:
             fh.write("".join(os.path.join(wurzel, "images", e["datei"]) + "\n"
@@ -188,9 +224,13 @@ def trainieren(projekt: str, modell: str, epochen: int, bildgroesse: int,
     protokoll = os.path.join(ziel, "protokoll.txt")
     with open(protokoll, "w", encoding="utf-8") as log:
         skript = YOLO_SKRIPT if _ist_yolo(modell) else SKRIPT
+        global _LAUFENDER
+        # Eigene Sitzung (Linux), damit sich die ganze Gruppe beenden laesst.
         prozess = subprocess.Popen([sys.executable, skript, "trainieren", auftrag],
                                    cwd=HIER, stdout=log, stderr=subprocess.STDOUT,
-                                   env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+                                   env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+                                   start_new_session=(os.name != "nt"))
+        _LAUFENDER = prozess
         while prozess.poll() is None:
             if abbrechen():
                 _beenden(prozess)
@@ -281,12 +321,21 @@ def erkennen(projekt: str, lauf: str, bild_bytes: bytes, schwelle: float = 0.25)
     skript = SKRIPT
     if _ist_yolo(lauf):
         skript, gewichte = YOLO_SKRIPT, os.path.join(gewichte, "best.pt")
-    eingabe = os.path.join(ordner(projekt), "probe_eingabe.png")
-    with open(eingabe, "wb") as fh:
-        fh.write(bild_bytes)
-    aus = subprocess.run([sys.executable, skript, "erkennen", gewichte, eingabe,
-                          str(schwelle)], capture_output=True, text=True,
-                         timeout=180, cwd=HIER)
+    # Eigene Datei je Aufruf: zwei gleichzeitige Proben ueberschrieben sich
+    # sonst gegenseitig das Eingabebild.
+    fd, eingabe = tempfile.mkstemp(dir=ordner(projekt), prefix="probe_",
+                                   suffix=".png")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(bild_bytes)
+        aus = subprocess.run([sys.executable, skript, "erkennen", gewichte,
+                              eingabe, str(schwelle)], capture_output=True,
+                             text=True, timeout=180, cwd=HIER)
+    finally:
+        try:
+            os.remove(eingabe)
+        except OSError:
+            pass
     if aus.returncode != 0:
         raise RuntimeError("Erkennung fehlgeschlagen: "
                            + (aus.stderr.strip().splitlines() or ["?"])[-1])

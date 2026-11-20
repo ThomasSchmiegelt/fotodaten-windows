@@ -632,7 +632,9 @@ class Engine:
                              subject=subject, paint_target=paint_target,
                              lock_seed=lock_seed, kombinationen=kombinationen)
 
-        self._cancel = False
+        # Ein Abbruch, der schon waehrend der Uebersetzung kam, gilt weiter:
+        # `aborted` setzt erst der naechste Auftrag zurueck.
+        self._cancel = self.aborted
         self._set(state="loading", image=0, count=len(jobs), step=0, total=steps,
                   started=time.time(), message="Text-Encoder wird geladen")
 

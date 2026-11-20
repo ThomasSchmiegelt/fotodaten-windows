@@ -48,6 +48,8 @@ import kennzeichen  # noqa: E402
 import sechsseiten  # noqa: E402
 import retusche  # noqa: E402
 import vervielfaeltigen  # noqa: E402
+import variablen  # noqa: E402
+from pibruecke import pi  # noqa: E402
 from kataloge import (  # noqa: E402
     AXIS_OFF, EFFECTS, EINSTELLUNGEN, FOLGEN, GEZEICHNET, GROUP_ACTIONS,
     MIMIK, PAINT_TARGET, WESEN,
@@ -232,10 +234,90 @@ class Handler(BaseHTTPRequestHandler):
         path = os.path.join(projekte.bilder(projekte.aktiv()), name)
         return path if os.path.isfile(path) else None
 
-    # -- Routen -----------------------------------------------------------
+    # -- Schutz ----------------------------------------------------------
+    def _fremd(self) -> str:
+        """Ein Grund, die Anfrage abzuweisen -- oder "".
+
+        Der Server haengt an 127.0.0.1, aber jede Webseite, die im selben
+        Browser offen ist, kann dorthin schicken. Ohne Pruefung haette eine
+        fremde Seite den Cloud-Zugang auf ihren eigenen Server umbiegen
+        koennen; der Schluessel waere mit dem naechsten Auftrag dorthin
+        gegangen. Zwei Pruefungen:
+
+        - Host: nur eine IP-Adresse oder localhost. Ein Name wie
+          boese.example, der auf 127.0.0.1 zeigt (DNS-Rebinding), faellt
+          heraus; das Handy im LAN spricht ohnehin eine IP an.
+        - Origin: schickt der Browser einen mit, muss er zum Host passen.
+        """
+        host = (self.headers.get("Host") or "").strip().lower()
+        name = urlparse(f"//{host}").hostname or ""
+        if host and name != "localhost" and not re.fullmatch(r"[\d.]+|[\da-f:]+", name):
+            return "fremder Host"
+        herkunft = self.headers.get("Origin")
+        if herkunft and herkunft != "null" and urlparse(herkunft).netloc.lower() != host:
+            return "fremde Herkunft"
+        if herkunft == "null":
+            return "fremde Herkunft"
+        return ""
+
     def do_GET(self):
+        grund = self._fremd()
+        if grund:
+            return self._json(403, {"error": grund})
+        try:
+            return self._get()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as fehler:
+            return self._fehler(fehler)
+
+    def do_POST(self):
+        # Den Rumpf immer ganz lesen, bevor geantwortet wird. Mit HTTP/1.1
+        # bleibt die Verbindung offen; eine fruehe Antwort (409, 403) liess
+        # den Rumpf sonst liegen, und der Server las die naechste Anfrage
+        # mitten aus einem Base64-Bild -- "Failed to fetch" beim naechsten
+        # Klick.
+        try:
+            laenge = max(0, int(self.headers.get("Content-Length", 0) or 0))
+        except ValueError:
+            laenge = 0
+        self.rfile = io.BytesIO(self.rfile.read(laenge) if laenge else b"")
+        grund = self._fremd()
+        if grund:
+            return self._json(403, {"error": grund})
+        try:
+            return self._post()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as fehler:
+            return self._fehler(fehler)
+
+    def _fehler(self, fehler: Exception):
+        """Ein Fehler in einer Route: als JSON statt als abgerissene Verbindung."""
+        import traceback
+        traceback.print_exc()
+        code = 400 if isinstance(fehler, (ValueError, KeyError, TypeError)) else 500
+        try:
+            return self._json(code, {"error": f"{type(fehler).__name__}: {fehler}"})
+        except OSError:
+            pass
+
+    # -- Routen -----------------------------------------------------------
+    def _get(self):
         url = urlparse(self.path)
         path = url.path
+
+        if path in ("/pi", "/pi.html"):
+            with open(os.path.join(SEITE, "pi.html"), "rb") as fh:
+                return self._send(200, fh.read(), "text/html; charset=utf-8")
+
+        if path == "/api/pi/ereignisse":
+            q = parse_qs(url.query)
+            try:
+                ab = int((q.get("ab") or ["0"])[0])
+            except ValueError:
+                ab = 0
+            return self._json(200, pi.ereignisse(ab))
 
         if path in ("/", "/index.html"):
             with open(os.path.join(SEITE, "index.html"), "rb") as fh:
@@ -314,6 +396,7 @@ class Handler(BaseHTTPRequestHandler):
             status["video"] = current["video"]
             status["gelesen"] = dict(current["gelesen"])
             status["tor"] = list(current["tor"])
+            status["gezogen"] = list(current.get("gezogen") or [])
             status["gliederung"] = list(current["gliederung"])
             status["expose"] = dict(current["expose"])
             status["bau"] = dict(current["bau"])
@@ -350,7 +433,7 @@ class Handler(BaseHTTPRequestHandler):
             info["bausteinarten"] = [{"key": k, "label": v}
                                      for k, v in bausteine.ARTEN.items()]
             info["mimik"] = [{"key": k, "label": v[0]} for k, v in MIMIK.items()]
-            info["gross"] = chat.GROSS
+            info["gross"] = chat.gewaehlt("gross")
             info["freigaben"] = [{"key": k, "label": v[0]}
                                  for k, v in chat.FREIGABEN.items()]
             info["erzaehler"] = [{"key": k, "label": v[0]}
@@ -436,8 +519,13 @@ class Handler(BaseHTTPRequestHandler):
 
         return self._json(404, {"error": "not found"})
 
-    def do_POST(self):
+    def _post(self):
         path = urlparse(self.path).path
+
+        if path == "/api/pi":
+            return self._pi()
+        if path == "/api/sprachmodelle":
+            return self._sprachmodelle()
 
         if path == "/api/cancel":
             # Ohne Angabe: den laufenden Auftrag stoppen. Mit "nummer": einen
@@ -1455,6 +1543,10 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError as exc:
             return self._json(400, {"error": f"ungueltiges JSON: {exc}"})
 
+        # null aus dem Browser wie leer behandeln -- sonst AttributeError
+        # bei .strip() weiter unten.
+        for feld in ("prompt", "negative_prompt"):
+            params[feld] = str(params.get(feld) or "")
         refs = params.get("images") or []
 
         # Musterbilder von Bausteinen als Vorlage. Wer mehrere Personen in
@@ -1521,6 +1613,112 @@ class Handler(BaseHTTPRequestHandler):
                                 "nummern": nummern})
 
 
+def _pi_katalog() -> str:
+    """Die erlaubten Schluessel fuer pi, aus denselben Tabellen wie die Regler."""
+    k = catalog()
+    teile = []
+    for feld, liste in (("aspect", [{"key": a} for a in ASPECT_RATIOS]),
+                        ("style", k.get("styles")), ("light", k.get("lights")),
+                        ("camera", k.get("cameras")), ("view", k.get("views"))):
+        schluessel = [str(x.get("key")) for x in (liste or []) if x.get("key")]
+        teile.append(f"{feld}: " + ", ".join(schluessel))
+    return "\n".join(teile)
+
+
+def _pi_pruefen(roh: dict) -> dict:
+    """Die Uebergabe von pi gegen die echten Tabellen pruefen.
+
+    Nur was pi ausdruecklich gesetzt hat, kommt mit -- sanitise() fuellt
+    sonst Vorgaben wie 1:1 auf, und die ueberschrieben auf der Seite, was der
+    Benutzer dort schon eingestellt hatte.
+    """
+    if not isinstance(roh, dict):
+        return {}
+    sauber = chat.sanitise(roh, 0)
+    aus = {k: sauber[k] for k in ("aspect", "style", "light", "camera", "view",
+                                   "count") if k in roh and sauber.get(k) not in (None, "")}
+    aus["prompt"] = str(roh.get("prompt") or "").strip()
+    if str(roh.get("negative_prompt") or "").strip():
+        aus["negative_prompt"] = str(roh["negative_prompt"]).strip()
+    werte = variablen.werte_sauber(roh.get("variablen"))
+    if werte:
+        aus["variablen"] = werte
+    return aus
+
+
+def _pi_route(self):
+    """pi: schreiben, abbrechen, neu, Modelle. Siehe pibruecke.py."""
+    params = self._body()
+    if params is None:
+        return self._json(400, {"error": "ungueltiges JSON"})
+    was = params.get("tu") or "status"
+    try:
+        if was == "status":
+            return self._json(200, pi.verfuegbar())
+        if was == "schreiben":
+            text = str(params.get("text") or "").strip()
+            if not text:
+                return self._json(400, {"error": "Kein Text"})
+            # Ein lokales Modell braucht die Karte -- solange das Bildmodell
+            # rechnet, ist daneben kein Platz.
+            if engine.lock.locked() and pi.modell.get("provider") in ("ollama", ""):
+                return self._json(409, {"error": "Es laeuft gerade ein Auftrag"})
+            bilder = []
+            for d in params.get("bilder") or []:
+                kopf, _, daten = str(d).partition(",")
+                art = re.search(r"data:(image/[\w.+-]+);base64", kopf)
+                if art and daten:
+                    bilder.append({"type": "image", "data": daten,
+                                   "mimeType": art.group(1)})
+            if not pi.katalog:
+                pi.katalog = _pi_katalog()
+            pi.schreiben(text, bilder)
+            return self._json(200, {"ok": True})
+        if was == "abbrechen":
+            pi.abbrechen()
+            return self._json(200, {"ok": True})
+        if was == "neu":
+            pi.neu()
+            return self._json(200, {"ok": True})
+        if was == "entladen":
+            return self._json(200, {"ok": pi.entladen(chat.OLLAMA)})
+        if was == "modelle":
+            if not pi.katalog:
+                pi.katalog = _pi_katalog()
+            return self._json(200, {"modelle": pi.modelle(), **pi.modell})
+    except RuntimeError as fehler:
+        return self._json(502, {"error": str(fehler)})
+    return self._json(400, {"error": "unbekannt"})
+
+
+def _sprachmodelle_route(self):
+    """Welches Sprachmodell wofuer: lesen und, vom eigenen Rechner, setzen."""
+    params = self._body()
+    if params is None:
+        return self._json(400, {"error": "ungueltiges JSON"})
+    if (params.get("tu") or "lesen") == "speichern":
+        if not self._nur_hier():
+            return self._json(403, {"error": "Nur vom Rechner des Servers aus"})
+        neu = params.get("wahl") or {}
+        wahl = chat.waehlen(neu)
+        if "pi_provider" in neu or "pi_modell" in neu:
+            try:
+                pi.modell_setzen(wahl["pi_provider"], wahl["pi_modell"])
+            except RuntimeError as fehler:
+                return self._json(502, {"error": f"pi: {fehler}", "wahl": wahl})
+    try:
+        installiert = chat.installiert()
+    except Exception:
+        installiert = []
+    return self._json(200, {"wahl": chat.wahl(), "ollama": installiert,
+                            "cloud": bool(cloud.aktiv("sprache")),
+                            "pi": pi.verfuegbar()})
+
+
+Handler._pi = _pi_route
+Handler._sprachmodelle = _sprachmodelle_route
+
+
 class _Server(ThreadingHTTPServer):
     """Unter Windows den Port fuer sich allein.
 
@@ -1542,6 +1740,14 @@ class _Server(ThreadingHTTPServer):
 
 
 def main():
+    # pi bekommt die gespeicherte Wahl mit; gestartet wird er erst beim
+    # ersten Satz im pi-Fenster.
+    gespeichert = chat.wahl()
+    if gespeichert["pi_provider"] and gespeichert["pi_modell"]:
+        pi.modell = {"provider": gespeichert["pi_provider"],
+                     "modell": gespeichert["pi_modell"]}
+    pi.ollama = chat.OLLAMA
+    pi.pruefen = _pi_pruefen
     try:
         server = _Server((HOST, PORT), Handler)
     except OSError as fehler:

@@ -17,6 +17,7 @@ Schluessel im Repository waere ein veroeffentlichter Schluessel.
 """
 
 import base64
+import http.client
 import io
 import json
 import os
@@ -132,10 +133,20 @@ def schreiben(neu: dict) -> dict:
                 ziel["schluessel"] = ""
         # Erst anlegen mit 0600, dann schreiben: der Schluessel soll keinen
         # Augenblick fuer andere lesbar auf der Platte liegen.
-        fd = os.open(DATEI, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(daten, fh, ensure_ascii=False, indent=2)
-        os.chmod(DATEI, 0o600)
+        # Ueber eine Nebendatei und os.replace, damit ein Absturz mitten im
+        # Schreiben nicht die Einstellungen samt Schluesseln zerstoert.
+        tmp = f"{DATEI}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(daten, fh, ensure_ascii=False, indent=2)
+            os.replace(tmp, DATEI)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
     return oeffentlich()
 
 
@@ -154,6 +165,8 @@ def aktiv(platz: str) -> dict | None:
 # nicht -- ohne Wiederholung brach daran der ganze Auftrag ab.
 WARTEN = (5, 15, 40)
 VORUEBERGEHEND = (429, 502, 503, 504)
+# Ein Anbieter mit Retry-After von Stunden wuerde den Auftrag ewig haengen.
+WARTEN_HOECHSTENS = 120
 
 
 def _einmal(e: dict, pfad: str, daten: bytes, art: str, timeout: int) -> dict:
@@ -175,7 +188,10 @@ def _einmal(e: dict, pfad: str, daten: bytes, art: str, timeout: int) -> dict:
         if fehler.code in VORUEBERGEHEND:
             # Bei 429 sagt der Anbieter selbst, wann es wieder geht.
             try:
-                neu.warten = float(fehler.headers.get("Retry-After") or 0) or True
+                sek = float(fehler.headers.get("Retry-After") or 0)
+                # nan/inf/negativ gelten wie "keine Angabe"
+                neu.warten = (min(sek, WARTEN_HOECHSTENS)
+                              if 0 < sek < float("inf") else True)
             except ValueError:
                 neu.warten = True
         raise neu
@@ -187,6 +203,13 @@ def _einmal(e: dict, pfad: str, daten: bytes, art: str, timeout: int) -> dict:
         neu = RuntimeError(f"{e['url']} antwortet nicht innerhalb von {timeout} s"
                            if isinstance(fehler, TimeoutError)
                            else f"Verbindung zu {e['url']} abgebrochen ({fehler})")
+        neu.warten = True
+        raise neu
+    except (json.JSONDecodeError, http.client.IncompleteRead, OSError) as fehler:
+        # Halbe oder kaputte Antwort mitten im Lesen: auch das ist
+        # voruebergehend und gehoert in die Wiederholung statt zum Abbruch.
+        neu = RuntimeError(f"Antwort von {e['url']} unbrauchbar "
+                           f"({type(fehler).__name__}: {fehler})")
         neu.warten = True
         raise neu
 
@@ -207,7 +230,8 @@ def _anfrage(e: dict, pfad: str, daten: bytes, art: str, timeout: int) -> dict:
             warten = getattr(fehler, "warten", None)
             if not warten or pause is None:
                 raise
-            pause = warten if isinstance(warten, float) else pause
+            pause = min(warten if isinstance(warten, float) else pause,
+                        WARTEN_HOECHSTENS)
             print(f"Cloud: {fehler} -- neuer Versuch {versuch + 1} in {pause:.0f} s",
                   file=sys.stderr, flush=True)
             time.sleep(pause)
