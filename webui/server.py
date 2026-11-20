@@ -33,6 +33,7 @@ from auftraege import (  # noqa: E402
     verschieben,
 )
 import projekte  # noqa: E402
+import auftraege  # noqa: E402
 import bausteine  # noqa: E402
 import bewertung  # noqa: E402
 import baender  # noqa: E402
@@ -232,7 +233,18 @@ class Handler(BaseHTTPRequestHandler):
         if not SAFE_NAME.fullmatch(name):
             return None
         path = os.path.join(projekte.bilder(projekte.aktiv()), name)
-        return path if os.path.isfile(path) else None
+        if os.path.isfile(path):
+            return path
+        # Waehrend ein Auftrag laeuft, darf man das Projekt wechseln -- seine
+        # Bilder landen aber weiter in dem, in dem er eingereiht wurde. Ohne
+        # diesen zweiten Blick zeigte die Seite fuer den laufenden Auftrag
+        # nur kaputte Vorschauen.
+        lauf = auftraege._projekt_des_laufs
+        if lauf != projekte.aktiv() and projekte.vorhanden(lauf):
+            path = os.path.join(projekte.bilder(lauf), name)
+            if os.path.isfile(path):
+                return path
+        return None
 
     # -- Schutz ----------------------------------------------------------
     def _fremd(self) -> str:
@@ -330,7 +342,7 @@ class Handler(BaseHTTPRequestHandler):
             if len(teile) != 2:
                 return self._json(404, {"error": "not found"})
             schluessel, name = teile
-            if not projekte.SCHLUESSEL.fullmatch(schluessel) \
+            if not projekte.vorhanden(schluessel) \
                     or not SAFE_NAME.fullmatch(name):
                 return self._json(404, {"error": "not found"})
             datei = os.path.join(projekte.bilder(schluessel), name)
@@ -1275,17 +1287,31 @@ class Handler(BaseHTTPRequestHandler):
                 # der Datensaetze.
                 if engine.lock.locked():
                     return self._json(409, {"error": "Erst abwarten: es laeuft ein Auftrag"})
-                quellen = [str(q) for q in params.get("quellen") or []
-                           if projekte.SCHLUESSEL.fullmatch(str(q))]
+                # Erst pruefen, dann anlegen oder umschalten: frueher wechselte
+                # das aktive Projekt (oder es entstand ein leeres "zusammen"),
+                # obwohl das Zusammenfuehren danach mit 400 scheiterte.
                 ziel = str(params.get("ziel") or "")
-                if ziel == "neu":
+                quellen = [str(q) for q in params.get("quellen") or []
+                           if projekte.vorhanden(str(q)) and str(q) != ziel]
+                klasse = str(params.get("klasse") or "").strip() or None
+                if not quellen:
+                    return self._json(400, {"error":
+                        "Bitte mindestens ein anderes Projekt als Quelle wählen"})
+                if klasse and not datensatz.KLASSE.fullmatch(klasse):
+                    return self._json(400, {"error":
+                        "Die Klasse bitte klein, ohne Leerzeichen, z. B. anhaengerkupplung"})
+                neu_angelegt = ziel == "neu"
+                vorher = projekte.aktiv()
+                if neu_angelegt:
                     ziel = projekte.anlegen(str(params.get("name") or "zusammen"))["key"]
-                elif not projekte.SCHLUESSEL.fullmatch(ziel) or not projekte.waehlen(ziel):
+                elif not projekte.vorhanden(ziel):
                     return self._json(404, {"error": "Zielprojekt nicht gefunden"})
                 try:
-                    zahl = datensatz.zusammenfuehren(
-                        quellen, ziel, str(params.get("klasse") or "").strip() or None)
+                    zahl = datensatz.zusammenfuehren(quellen, ziel, klasse)
                 except ValueError as exc:
+                    if neu_angelegt:
+                        projekte.loeschen(ziel)
+                        projekte.waehlen(vorher)
                     return self._json(400, {"error": str(exc)})
                 # Das Ziel ist danach das aktive Projekt: der naechste
                 # Schritt trainiert es.

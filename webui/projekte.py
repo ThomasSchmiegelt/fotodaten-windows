@@ -56,6 +56,18 @@ def _pruefen(schluessel: str) -> str:
     return schluessel
 
 
+def vorhanden(schluessel: str) -> bool:
+    """Gibt es dieses Projekt schon? Legt -- anders als ordner() -- nichts an.
+
+    Fuer lesende Wege: ein vertippter Bildverweis wie /bilder/foo/a.png
+    legte sonst projekte/foo/ an, und "foo" stand ab da in der Projektliste.
+    """
+    if schluessel == ALLGEMEIN:
+        return True
+    return bool(SCHLUESSEL.fullmatch(schluessel or "")) \
+        and os.path.isdir(os.path.join(WURZEL, schluessel))
+
+
 def ordner(schluessel: str) -> str:
     """Das Datenverzeichnis eines Projekts -- fuer alles ausser den Bildern.
 

@@ -56,7 +56,9 @@ fi
 
 "$PY" webui/server.py &
 SERVER=$!
-trap 'kill $SERVER 2>/dev/null || true' INT TERM EXIT
+# Fuer stop.sh: genau dieser Prozess, nicht jeder Bildermacher im System.
+echo "$SERVER" > server.pid
+trap 'kill $SERVER 2>/dev/null || true; rm -f server.pid' INT TERM EXIT
 
 # Browser oeffnen, sobald der Server antwortet.
 URL="http://${QWEN_LOCAL}:${QWEN_PORT}"

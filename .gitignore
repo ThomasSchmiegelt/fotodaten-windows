@@ -51,3 +51,6 @@ sprachmodelle.json
 
 # Protokolle von einrichten.sh und start.sh
 *.log
+
+# Prozessnummer des laufenden Servers (start.sh, stop.sh)
+server.pid

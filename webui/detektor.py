@@ -299,7 +299,7 @@ def laeufe(projekt: str) -> list[dict]:
 
 
 def bildpfad(projekt: str, lauf: str, datei: str) -> str | None:
-    if not projekte.SCHLUESSEL.fullmatch(projekt or "") or not LAUF.fullmatch(lauf or "") \
+    if not projekte.vorhanden(projekt or "") or not LAUF.fullmatch(lauf or "") \
             or not BILD.fullmatch(datei or ""):
         return None
     pfad = os.path.join(ordner(projekt), lauf, datei)

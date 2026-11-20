@@ -216,7 +216,7 @@ def _formate(projekt: str, daten: list[dict]) -> None:
 
 def bildpfad(projekt: str, status: str, datei: str) -> str | None:
     """Der Pfad eines Datensatzbildes -- jeder Teil gegen sein Muster geprueft."""
-    if not projekte.SCHLUESSEL.fullmatch(projekt or "") or status not in ORDNER \
+    if not projekte.vorhanden(projekt or "") or status not in ORDNER \
             or not DATEI.fullmatch(datei or ""):
         return None
     pfad = os.path.join(wurzel(projekt), ORDNER[status], datei)
@@ -318,7 +318,10 @@ def zusammenfuehren(quellen: list[str], ziel: str, klasse: str | None = None) ->
     """
     if klasse and not KLASSE.fullmatch(klasse):
         raise ValueError("Die Klasse bitte klein, ohne Leerzeichen, z. B. anhaengerkupplung")
-    quellen = [q for q in dict.fromkeys(quellen or []) if q != ziel]
+    # Nur Projekte, die es gibt: wurzel() legt sonst fuer jeden gueltig
+    # aussehenden Namen einen leeren Datensatz -- und damit ein Projekt -- an.
+    quellen = [q for q in dict.fromkeys(quellen or [])
+               if q != ziel and projekte.vorhanden(q)]
     if not quellen:
         raise ValueError("Bitte mindestens ein anderes Projekt als Quelle wählen")
     zaehler = {"bilder": 0, "projekte": 0, "umbenannt": 0}
@@ -352,7 +355,7 @@ def zusammenfuehren(quellen: list[str], ziel: str, klasse: str | None = None) ->
                 # ihrem Namen im Ziel.
                 if n.get("quelle"):
                     n["quelle"] = neu_name.get(n["quelle"], n["quelle"])
-                _klasse_nummer(ziel, n["klasse"])
+                _klasse_nummer(ziel, n.get("klasse") or "objekt")
                 _verknuepfen(os.path.join(wurzel(q), ORDNER["ok"], e["datei"]),
                              os.path.join(wurzel(ziel), ORDNER["ok"], n["datei"]))
                 daten.append(n)
