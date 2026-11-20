@@ -13,6 +13,7 @@ nur fuer einen.
 """
 
 import atexit
+import glob
 import json
 import os
 import shutil
@@ -69,13 +70,67 @@ Einstellungen nur, wenn sie besprochen wurden. Erlaubte Schlüssel:
 {katalog}"""
 
 
+def _versionsschluessel(pfad: str) -> tuple:
+    """v22.20.0 -> (22, 20, 0), damit v22 vor v9 einsortiert wird."""
+    teile = os.path.basename(os.path.dirname(os.path.dirname(pfad))).lstrip("v")
+    return tuple(int(t) if t.isdigit() else 0 for t in teile.split("."))
+
+
+def _orte() -> list[str]:
+    """Wo `npm install -g` pi ablegt, wenn es nicht im Suchpfad steht.
+
+    Der haeufigste Fall: Node kommt ueber nvm. nvm traegt sich nur in einer
+    interaktiven Shell in PATH ein -- ein Server, der aus einem Starter, einer
+    Verknuepfung oder einer nicht-interaktiven Shell kommt, sieht ~/.nvm/...
+    nicht. Gemessen: genau so lief der Server hier, und das Fenster meldete
+    "pi nicht gefunden", obwohl pi installiert war.
+    """
+    heim = os.path.expanduser("~")
+    if WINDOWS:
+        appdata = os.environ.get("APPDATA") or os.path.join(heim, "AppData", "Roaming")
+        return [os.path.join(appdata, "npm", "pi.cmd")]
+    kandidaten = []
+    if os.environ.get("NVM_BIN"):
+        kandidaten.append(os.path.join(os.environ["NVM_BIN"], "pi"))
+    nvm = os.environ.get("NVM_DIR") or os.path.join(heim, ".nvm")
+    kandidaten += sorted(glob.glob(os.path.join(nvm, "versions", "node", "*", "bin", "pi")),
+                         key=_versionsschluessel, reverse=True)
+    kandidaten += [os.path.join(heim, ".npm-global", "bin", "pi"),
+                   os.path.join(heim, ".local", "bin", "pi"),
+                   os.path.join(heim, ".volta", "bin", "pi"),
+                   "/usr/local/bin/pi", "/opt/homebrew/bin/pi"]
+    return kandidaten
+
+
 def _pi_befehl() -> list[str] | None:
     """Der Aufruf von pi. QWEN_PI setzt ihn ausdruecklich."""
     eigen = os.environ.get("QWEN_PI")
     if eigen:
-        return [eigen]
+        return [shutil.which(eigen) or eigen]
     gefunden = shutil.which("pi.cmd" if WINDOWS else "pi") or shutil.which("pi")
+    if not gefunden:
+        gefunden = next((k for k in _orte() if os.path.isfile(k)
+                         and os.access(k, os.X_OK)), None)
     return [gefunden] if gefunden else None
+
+
+def _umgebung(befehl: str) -> dict:
+    """PATH fuer pi: sein eigener Ordner vorn.
+
+    pi ist ein Node-Skript (#!/usr/bin/env node). Bei nvm liegt `node` im
+    selben Ordner wie pi -- ohne diesen Eintrag faende es pi zwar, Node
+    aber nicht.
+    """
+    env = dict(os.environ)
+    ordner = os.path.dirname(os.path.abspath(befehl))
+    env["PATH"] = ordner + os.pathsep + env.get("PATH", "")
+    return env
+
+
+def _node_fehlt(befehl: str) -> bool:
+    if WINDOWS:
+        return False                 # pi.cmd ruft node.exe selbst auf
+    return not shutil.which("node", path=_umgebung(befehl)["PATH"])
 
 
 class Pi:
@@ -103,8 +158,14 @@ class Pi:
         befehl = _pi_befehl()
         if not befehl:
             return {"available": False,
-                    "reason": "pi nicht gefunden – npm install -g "
-                              "@earendil-works/pi-coding-agent, oder QWEN_PI setzen"}
+                    "reason": "pi nicht gefunden (gesucht im PATH und in "
+                              "~/.nvm, ~/.npm-global, /usr/local/bin) – "
+                              "npm install -g @earendil-works/pi-coding-agent, "
+                              "oder QWEN_PI=/pfad/zu/pi setzen"}
+        if _node_fehlt(befehl[0]):
+            return {"available": False,
+                    "reason": f"pi gefunden ({befehl[0]}), aber kein node daneben "
+                              "oder im PATH"}
         return {"available": True, "befehl": befehl[0],
                 "laeuft": bool(self.proc and self.proc.poll() is None),
                 "denkt": self.laeuft, **self.modell}
@@ -113,8 +174,9 @@ class Pi:
         if self.proc and self.proc.poll() is None:
             return
         befehl = _pi_befehl()
-        if not befehl:
-            raise RuntimeError(self.verfuegbar()["reason"])
+        stand = self.verfuegbar()
+        if not befehl or not stand["available"]:
+            raise RuntimeError(stand["reason"])
         args = befehl + [
             "--mode", "rpc", "--no-session",
             "-nc", "-ns", "-np", "--no-themes", "-ne",
@@ -129,7 +191,8 @@ class Pi:
         # als Projektdatei lesen.
         arbeit = os.path.join(HERE, "pi")
         self.proc = subprocess.Popen(
-            args, cwd=arbeit, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            args, cwd=arbeit, env=_umgebung(befehl[0]),
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, encoding="utf-8", errors="replace",
             bufsize=1)
         threading.Thread(target=self._lesen, args=(self.proc,), daemon=True,
